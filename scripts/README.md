@@ -16,7 +16,19 @@ bun run scripts/install-commit-hooks.ts ~/dev/c20s
 
 ## generate-commit-message.ts
 
-Run automatically by the `prepare-commit-msg` hook (installed by the script above). Not meant to be invoked directly. On `git commit` (without `-m`), it prompts in the terminal whether Claude should generate a Conventional Commits message from the staged diff, and streams the response live as it's written.
+Run automatically by the `prepare-commit-msg` hook (installed by the script above). Not meant to be invoked directly. On `git commit` (without `-m`), it generates a Conventional Commits message from the staged diff using Claude, and streams the response live as it's written.
+
+Behavior is controlled by `~/.config/c20s/pre-commit-message.json`:
+
+```json
+{ "mode": "ask" }
+```
+
+- `"ask"` (default if the file is missing or invalid) — prompts in the terminal each time whether to generate a message.
+- `"always"` — always generates without asking.
+- `"manual"` — never generates; you write the commit message yourself.
+
+`-m`/`-F`/merge/squash/template commits always skip generation regardless of `mode`.
 
 ## prepare-commit-msg-hook.sh
 

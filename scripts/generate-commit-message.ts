@@ -1,8 +1,27 @@
 #!/usr/bin/env bun
 import { readFile, writeFile, open } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const SKIP_SOURCES = new Set(["message", "template", "merge", "squash"]);
+
+const CONFIG_PATH = join(homedir(), ".config", "c20s", "pre-commit-message.json");
+
+type Mode = "always" | "manual" | "ask";
+
+const readMode = async (): Promise<Mode> => {
+  try {
+    const raw = await readFile(CONFIG_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed.mode === "always" || parsed.mode === "manual" || parsed.mode === "ask") {
+      return parsed.mode;
+    }
+    return "ask";
+  } catch {
+    return "ask";
+  }
+};
 
 const buildPrompt = (filePaths: string, diff: string): string =>
   `Generate a git commit message in Conventional Commits format (type(scope): summary).
@@ -41,16 +60,24 @@ const main = async () => {
     process.exit(0);
   }
 
-  const tty = await open("/dev/tty", "r+").catch(() => null);
-  if (tty) {
-    const ttyStream = tty.createReadStream();
-    const rl = createInterface({ input: ttyStream, output: tty.createWriteStream() });
-    const answer = await rl.question("Generera commit-meddelande med Claude? [Y/n] ");
-    rl.close();
-    ttyStream.destroy();
-    await tty.close();
-    if (answer.trim().toLowerCase().startsWith("n")) {
-      process.exit(0);
+  const mode = await readMode();
+
+  if (mode === "manual") {
+    process.exit(0);
+  }
+
+  if (mode === "ask") {
+    const tty = await open("/dev/tty", "r+").catch(() => null);
+    if (tty) {
+      const ttyStream = tty.createReadStream();
+      const rl = createInterface({ input: ttyStream, output: tty.createWriteStream() });
+      const answer = await rl.question("Generera commit-meddelande med Claude? [Y/n] ");
+      rl.close();
+      ttyStream.destroy();
+      await tty.close();
+      if (answer.trim().toLowerCase().startsWith("n")) {
+        process.exit(0);
+      }
     }
   }
 
