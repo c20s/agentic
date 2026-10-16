@@ -52,7 +52,18 @@ const main = async () => {
   }
 
   const claudeProc = Bun.spawn(
-    ["claude", "-p", buildPrompt(filePaths, diff), "--output-format", "stream-json", "--include-partial-messages", "--verbose"],
+    [
+      "claude",
+      "-p",
+      buildPrompt(filePaths, diff),
+      "--output-format",
+      "stream-json",
+      "--include-partial-messages",
+      "--verbose",
+      "--restricted",
+      "--disable-slash-commands",
+      "--strict-mcp-config",
+    ],
     { stdout: "pipe", stderr: "pipe" },
   );
 
