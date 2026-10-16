@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, open } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 
 const SKIP_SOURCES = new Set(["message", "template", "merge", "squash"]);
@@ -38,10 +38,14 @@ const main = async () => {
     process.exit(0);
   }
 
-  if (process.stdin.isTTY && process.stderr.isTTY) {
-    const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const tty = await open("/dev/tty", "r+").catch(() => null);
+  if (tty) {
+    const ttyStream = tty.createReadStream();
+    const rl = createInterface({ input: ttyStream, output: tty.createWriteStream() });
     const answer = await rl.question("Generera commit-meddelande med Claude? [Y/n] ");
     rl.close();
+    ttyStream.destroy();
+    await tty.close();
     if (answer.trim().toLowerCase().startsWith("n")) {
       process.exit(0);
     }
