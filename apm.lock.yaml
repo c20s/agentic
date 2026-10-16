@@ -3,6 +3,42 @@ dependencies: []
 deployments:
 - kind: project-relative
   target: claude
+  value: .claude/skills/copilot
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/copilot/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:5a39ac34198c9919228ecb628f57ba619b8a1484fd2be3799a17506de579a2d4
+- kind: project-relative
+  target: claude
+  value: .claude/skills/copilot/scripts/open-pane.sh
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:270de1dc192db2d7c38a1b2a33df954a2617819fb31b7aa653785567107c9cd0
+- kind: project-relative
+  target: claude
+  value: .claude/skills/copilot/scripts/watch.sh
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:0419dd8a62e71a11557f8e1fe7922d7130ce554accc9bf86691d157837dbea65
+- kind: project-relative
+  target: claude
   value: .claude/skills/review-assistant
   runtime: null
   scope: project
@@ -18,7 +54,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:44abd5cbcf050b9c65e12e0809e4121d788aed89fa7803a051c43ceb20f76ca9
+  content_hash: sha256:32b9c11501042cb3d691c94c8b1a4a9118ee6a469e55216f9f5307003dfa2e77
 - kind: project-relative
   target: claude
   value: .claude/skills/review-assistant/references/file-routing.md
@@ -174,6 +210,42 @@ deployments:
   content_hash: sha256:115917dc11e47eb2587b37b0e23b616b98a0813756f2c31ce870aec6e191e59a
 - kind: project-relative
   target: legacy
+  value: .agents/skills/copilot
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/copilot/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:5a39ac34198c9919228ecb628f57ba619b8a1484fd2be3799a17506de579a2d4
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/copilot/scripts/open-pane.sh
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:270de1dc192db2d7c38a1b2a33df954a2617819fb31b7aa653785567107c9cd0
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/copilot/scripts/watch.sh
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:0419dd8a62e71a11557f8e1fe7922d7130ce554accc9bf86691d157837dbea65
+- kind: project-relative
+  target: legacy
   value: .agents/skills/review-assistant
   runtime: null
   scope: project
@@ -189,7 +261,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:44abd5cbcf050b9c65e12e0809e4121d788aed89fa7803a051c43ceb20f76ca9
+  content_hash: sha256:32b9c11501042cb3d691c94c8b1a4a9118ee6a469e55216f9f5307003dfa2e77
 - kind: project-relative
   target: legacy
   value: .agents/skills/review-assistant/references/file-routing.md
@@ -506,6 +578,10 @@ deployments:
   active_owner: .
   content_hash: sha256:115917dc11e47eb2587b37b0e23b616b98a0813756f2c31ce870aec6e191e59a
 local_deployed_files:
+- .agents/skills/copilot
+- .agents/skills/copilot/SKILL.md
+- .agents/skills/copilot/scripts/open-pane.sh
+- .agents/skills/copilot/scripts/watch.sh
 - .agents/skills/review-assistant
 - .agents/skills/review-assistant/SKILL.md
 - .agents/skills/review-assistant/references/file-routing.md
@@ -543,6 +619,10 @@ local_deployed_files:
 - .agents/skills/skill-creator/references/one-case-per-reference-file.md
 - .agents/skills/skill-creator/references/validation.md
 - .agents/skills/skill-creator/references/worked-example.md
+- .claude/skills/copilot
+- .claude/skills/copilot/SKILL.md
+- .claude/skills/copilot/scripts/open-pane.sh
+- .claude/skills/copilot/scripts/watch.sh
 - .claude/skills/review-assistant
 - .claude/skills/review-assistant/SKILL.md
 - .claude/skills/review-assistant/references/file-routing.md
@@ -563,7 +643,10 @@ local_deployed_files:
 - .claude/skills/skill-creator/references/eval-first.md
 - .claude/skills/skill-creator/references/worked-example.md
 local_deployed_file_hashes:
-  .agents/skills/review-assistant/SKILL.md: sha256:44abd5cbcf050b9c65e12e0809e4121d788aed89fa7803a051c43ceb20f76ca9
+  .agents/skills/copilot/SKILL.md: sha256:5a39ac34198c9919228ecb628f57ba619b8a1484fd2be3799a17506de579a2d4
+  .agents/skills/copilot/scripts/open-pane.sh: sha256:270de1dc192db2d7c38a1b2a33df954a2617819fb31b7aa653785567107c9cd0
+  .agents/skills/copilot/scripts/watch.sh: sha256:0419dd8a62e71a11557f8e1fe7922d7130ce554accc9bf86691d157837dbea65
+  .agents/skills/review-assistant/SKILL.md: sha256:32b9c11501042cb3d691c94c8b1a4a9118ee6a469e55216f9f5307003dfa2e77
   .agents/skills/review-assistant/references/file-routing.md: sha256:53e6267513c6ab34487e7669686552638049565c44495212cffea1b5327ce3fb
   .agents/skills/review-assistant/references/full-repo-review.md: sha256:db471b78d0a09df11a9f8b62ce94cabc83cc72d87583ab3fd111462b134fa1ee
   .agents/skills/review-assistant/references/send-review-behavior.md: sha256:540955de166ccfd593c8a4025b29df57823516cff0565005e2dc8e264e70da96
@@ -596,7 +679,10 @@ local_deployed_file_hashes:
   .agents/skills/skill-creator/references/one-case-per-reference-file.md: sha256:7a826e63005535dccde2ae7464528bc6bd6f1abb9c25dc9ffe1356073a4c8ea1
   .agents/skills/skill-creator/references/validation.md: sha256:e2b9484a063f16e139308503f1737fa5115a68dbe97915f0b34b043aad543747
   .agents/skills/skill-creator/references/worked-example.md: sha256:115917dc11e47eb2587b37b0e23b616b98a0813756f2c31ce870aec6e191e59a
-  .claude/skills/review-assistant/SKILL.md: sha256:44abd5cbcf050b9c65e12e0809e4121d788aed89fa7803a051c43ceb20f76ca9
+  .claude/skills/copilot/SKILL.md: sha256:5a39ac34198c9919228ecb628f57ba619b8a1484fd2be3799a17506de579a2d4
+  .claude/skills/copilot/scripts/open-pane.sh: sha256:270de1dc192db2d7c38a1b2a33df954a2617819fb31b7aa653785567107c9cd0
+  .claude/skills/copilot/scripts/watch.sh: sha256:0419dd8a62e71a11557f8e1fe7922d7130ce554accc9bf86691d157837dbea65
+  .claude/skills/review-assistant/SKILL.md: sha256:32b9c11501042cb3d691c94c8b1a4a9118ee6a469e55216f9f5307003dfa2e77
   .claude/skills/review-assistant/references/file-routing.md: sha256:53e6267513c6ab34487e7669686552638049565c44495212cffea1b5327ce3fb
   .claude/skills/review-assistant/references/full-repo-review.md: sha256:db471b78d0a09df11a9f8b62ce94cabc83cc72d87583ab3fd111462b134fa1ee
   .claude/skills/review-assistant/references/send-review-behavior.md: sha256:540955de166ccfd593c8a4025b29df57823516cff0565005e2dc8e264e70da96
