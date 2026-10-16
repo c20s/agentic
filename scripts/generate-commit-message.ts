@@ -37,16 +37,44 @@ const main = async () => {
     process.exit(0);
   }
 
-  const claudeProc = Bun.spawn(["claude", "-p", buildPrompt(filePaths, diff)], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const claudeProc = Bun.spawn(
+    ["claude", "-p", buildPrompt(filePaths, diff), "--output-format", "stream-json", "--include-partial-messages", "--verbose"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
 
-  const [message, errOutput] = await Promise.all([
-    new Response(claudeProc.stdout).text(),
+  process.stderr.write("Claude genererar commit-meddelande...\n");
+
+  const consumeStdout = async (): Promise<string> => {
+    let message = "";
+    let buffer = "";
+    for await (const chunk of claudeProc.stdout) {
+      buffer += Buffer.from(chunk).toString("utf8");
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event: any;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (event.type === "stream_event" && event.event?.type === "content_block_delta") {
+          const delta = event.event.delta?.text ?? "";
+          message += delta;
+          process.stderr.write(delta);
+        }
+      }
+    }
+    process.stderr.write("\n");
+    return message;
+  };
+
+  const [message, errOutput, exitCode] = await Promise.all([
+    consumeStdout(),
     new Response(claudeProc.stderr).text(),
+    claudeProc.exited,
   ]);
-  const exitCode = await claudeProc.exited;
 
   if (exitCode !== 0 || !message.trim()) {
     console.error(`generate-commit-message: claude misslyckades (${exitCode}): ${errOutput}`);
