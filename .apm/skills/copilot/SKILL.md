@@ -1,6 +1,6 @@
 ---
 name: copilot
-description: Applies the user's inline nit/issue/suggestion comments as real code edits live in nvim, instead of only replying
+description: Applies the user's comments and naive implementations as real code edits live in nvim
 ---
 
 # Copilot
@@ -54,9 +54,6 @@ description: Applies the user's inline nit/issue/suggestion comments as real cod
    call succeeding means the script itself is running.
 5. On wake, read `/tmp/claude-copilot-lastdiff-<run-id>` (the unified diff
    for this tick), not the full file, and scan only the added (`+`) lines
-   for new marker comments — `nit:`, `nitpick:`, `issue:`, `suggestion:` —
-   in whatever comment syntax the file uses. Fall back to a full Read only
-   if the diff looks ambiguous (e.g. heavily reformatted, or a rename).
 6. If you find a `todo` comment or a naive/stubbed implementation in the
    same diff hunk, think about how to implement, refactor, or update it —
    same apply-only rule as a marker: make the change, no proposal
