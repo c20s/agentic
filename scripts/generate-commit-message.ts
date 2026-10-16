@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { readFile, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
 
 const SKIP_SOURCES = new Set(["message", "template", "merge", "squash"]);
 
@@ -35,6 +36,15 @@ const main = async () => {
 
   if (!diff.trim()) {
     process.exit(0);
+  }
+
+  if (process.stdin.isTTY && process.stderr.isTTY) {
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    const answer = await rl.question("Generera commit-meddelande med Claude? [Y/n] ");
+    rl.close();
+    if (answer.trim().toLowerCase().startsWith("n")) {
+      process.exit(0);
+    }
   }
 
   const claudeProc = Bun.spawn(
