@@ -1,0 +1,201 @@
+lockfile_version: '1'
+dependencies: []
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:d6d9c47d359d2fea8497ceb0f929ff04761d25acc66f3111b3f2c9c3a5edd591
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/bullet-to-reference-linking.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:2add3009fb79c066fcadc2824df4a29c338b2686dbcc72c0742519d4f642302d
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/description-field.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:6937bc81005e744b94911d3d2ea6cc7df799643bc10bef514fd106ba18ddbe96
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/directory-shape.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a1efdf057b23ca84feb1ee5116b3b2654d3862346f55533a20ea7710e2d12531
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/headline-bullet-structure.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:b0f6162de20be9e69e8aca929fda2a91ffe84b498af44647ae9c55fb9a6fb670
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/naming.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:aa5995b3abf5aba64215873b88b472947ee38be85b9ae1ba5b582312c1aa0401
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/one-case-per-reference-file.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:7a826e63005535dccde2ae7464528bc6bd6f1abb9c25dc9ffe1356073a4c8ea1
+- kind: project-relative
+  target: claude
+  value: .claude/skills/skill-creator/references/validation.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:e2b9484a063f16e139308503f1737fa5115a68dbe97915f0b34b043aad543747
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:d6d9c47d359d2fea8497ceb0f929ff04761d25acc66f3111b3f2c9c3a5edd591
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator/references/bullet-to-reference-linking.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:2add3009fb79c066fcadc2824df4a29c338b2686dbcc72c0742519d4f642302d
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator/references/description-field.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:6937bc81005e744b94911d3d2ea6cc7df799643bc10bef514fd106ba18ddbe96
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator/references/directory-shape.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a1efdf057b23ca84feb1ee5116b3b2654d3862346f55533a20ea7710e2d12531
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator/references/headline-bullet-structure.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:b0f6162de20be9e69e8aca929fda2a91ffe84b498af44647ae9c55fb9a6fb670
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator/references/naming.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:aa5995b3abf5aba64215873b88b472947ee38be85b9ae1ba5b582312c1aa0401
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator/references/one-case-per-reference-file.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:7a826e63005535dccde2ae7464528bc6bd6f1abb9c25dc9ffe1356073a4c8ea1
+- kind: project-relative
+  target: legacy
+  value: .agents/skills/skill-creator/references/validation.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:e2b9484a063f16e139308503f1737fa5115a68dbe97915f0b34b043aad543747
+local_deployed_files:
+- .agents/skills/skill-creator
+- .agents/skills/skill-creator/SKILL.md
+- .agents/skills/skill-creator/references/bullet-to-reference-linking.md
+- .agents/skills/skill-creator/references/description-field.md
+- .agents/skills/skill-creator/references/directory-shape.md
+- .agents/skills/skill-creator/references/headline-bullet-structure.md
+- .agents/skills/skill-creator/references/naming.md
+- .agents/skills/skill-creator/references/one-case-per-reference-file.md
+- .agents/skills/skill-creator/references/validation.md
+- .claude/skills/skill-creator
+- .claude/skills/skill-creator/SKILL.md
+- .claude/skills/skill-creator/references/bullet-to-reference-linking.md
+- .claude/skills/skill-creator/references/description-field.md
+- .claude/skills/skill-creator/references/directory-shape.md
+- .claude/skills/skill-creator/references/headline-bullet-structure.md
+- .claude/skills/skill-creator/references/naming.md
+- .claude/skills/skill-creator/references/one-case-per-reference-file.md
+- .claude/skills/skill-creator/references/validation.md
+local_deployed_file_hashes:
+  .agents/skills/skill-creator/SKILL.md: sha256:d6d9c47d359d2fea8497ceb0f929ff04761d25acc66f3111b3f2c9c3a5edd591
+  .agents/skills/skill-creator/references/bullet-to-reference-linking.md: sha256:2add3009fb79c066fcadc2824df4a29c338b2686dbcc72c0742519d4f642302d
+  .agents/skills/skill-creator/references/description-field.md: sha256:6937bc81005e744b94911d3d2ea6cc7df799643bc10bef514fd106ba18ddbe96
+  .agents/skills/skill-creator/references/directory-shape.md: sha256:a1efdf057b23ca84feb1ee5116b3b2654d3862346f55533a20ea7710e2d12531
+  .agents/skills/skill-creator/references/headline-bullet-structure.md: sha256:b0f6162de20be9e69e8aca929fda2a91ffe84b498af44647ae9c55fb9a6fb670
+  .agents/skills/skill-creator/references/naming.md: sha256:aa5995b3abf5aba64215873b88b472947ee38be85b9ae1ba5b582312c1aa0401
+  .agents/skills/skill-creator/references/one-case-per-reference-file.md: sha256:7a826e63005535dccde2ae7464528bc6bd6f1abb9c25dc9ffe1356073a4c8ea1
+  .agents/skills/skill-creator/references/validation.md: sha256:e2b9484a063f16e139308503f1737fa5115a68dbe97915f0b34b043aad543747
+  .claude/skills/skill-creator/SKILL.md: sha256:d6d9c47d359d2fea8497ceb0f929ff04761d25acc66f3111b3f2c9c3a5edd591
+  .claude/skills/skill-creator/references/bullet-to-reference-linking.md: sha256:2add3009fb79c066fcadc2824df4a29c338b2686dbcc72c0742519d4f642302d
+  .claude/skills/skill-creator/references/description-field.md: sha256:6937bc81005e744b94911d3d2ea6cc7df799643bc10bef514fd106ba18ddbe96
+  .claude/skills/skill-creator/references/directory-shape.md: sha256:a1efdf057b23ca84feb1ee5116b3b2654d3862346f55533a20ea7710e2d12531
+  .claude/skills/skill-creator/references/headline-bullet-structure.md: sha256:b0f6162de20be9e69e8aca929fda2a91ffe84b498af44647ae9c55fb9a6fb670
+  .claude/skills/skill-creator/references/naming.md: sha256:aa5995b3abf5aba64215873b88b472947ee38be85b9ae1ba5b582312c1aa0401
+  .claude/skills/skill-creator/references/one-case-per-reference-file.md: sha256:7a826e63005535dccde2ae7464528bc6bd6f1abb9c25dc9ffe1356073a4c8ea1
+  .claude/skills/skill-creator/references/validation.md: sha256:e2b9484a063f16e139308503f1737fa5115a68dbe97915f0b34b043aad543747
