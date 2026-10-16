@@ -36,7 +36,8 @@ agentic/
 │   ├── skills/
 │   │   └── <skill-name>/
 │   │       ├── SKILL.md
-│   │       └── references/  # optional, linked from SKILL.md, not auto-loaded
+│   │       ├── references/  # optional, linked from SKILL.md, not auto-loaded
+│   │       └── scripts/      # optional, code the skill tells Claude to run
 │   ├── agents/
 │   │   └── <agent-name>.agent.md
 │   ├── instructions/
@@ -83,6 +84,8 @@ description: Reviews Terraform pull requests for unexpected resource changes and
 └── references/
     └── <case-name>.md       # only long or situational detail
 ```
+
+A skill can also ship real code in a `scripts/` folder, for tasks better done by running a script than by asking Claude to write one each time. Tell Claude the exact command to run, and have the skill check the runtime (e.g. `bun --version`) before relying on it. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full convention.
 
 ### Agent — `.apm/agents/<name>.agent.md`
 

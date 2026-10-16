@@ -66,6 +66,23 @@ Read Anthropic's [skill authoring best practices](https://platform.claude.com/do
 
 The first and third bullets are short, always-true rules, so they stay inline. The module-pinning bullet links out because the full guidance is long and only needed when that case comes up.
 
+### Adding scripts to a skill
+
+A skill can ship real code, not just Markdown. If a task is better done by running a script than by asking Claude to write one on the spot, add a `scripts/` folder next to `SKILL.md`.
+
+```
+.apm/skills/<skill-name>/
+├── SKILL.md
+├── references/
+└── scripts/
+    └── <name>.ts            # or .js — run with bun
+```
+
+- Tell Claude to run the script, not to read and re-type it. In `SKILL.md`: "Run `scripts/convert.ts` to do X," with the exact command.
+- The first time a skill runs a script, it must check the runtime is available first, for example `bun --version`. If it's missing, say so clearly instead of guessing or silently falling back to something else.
+- A script should handle its own errors and print a clear message. Don't write a script that just crashes and leaves Claude to guess why.
+- Don't put example code in `SKILL.md` that's meant to be run — put it in `scripts/` and call it from a bullet instead. A bullet like `- Run scripts/validate.ts to check output.` is enough.
+
 ## Adding an agent
 
 1. Create `.apm/agents/<agent-name>.agent.md`.
