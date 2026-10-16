@@ -18,7 +18,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:5a39ac34198c9919228ecb628f57ba619b8a1484fd2be3799a17506de579a2d4
+  content_hash: sha256:5af0ad8ae213b4f6f27ccdcc13a4ff43453dfda6e6fb0556c57b053638b672b6
 - kind: project-relative
   target: claude
   value: .claude/skills/copilot/scripts/open-pane.sh
@@ -225,7 +225,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:5a39ac34198c9919228ecb628f57ba619b8a1484fd2be3799a17506de579a2d4
+  content_hash: sha256:5af0ad8ae213b4f6f27ccdcc13a4ff43453dfda6e6fb0556c57b053638b672b6
 - kind: project-relative
   target: legacy
   value: .agents/skills/copilot/scripts/open-pane.sh
@@ -643,7 +643,7 @@ local_deployed_files:
 - .claude/skills/skill-creator/references/eval-first.md
 - .claude/skills/skill-creator/references/worked-example.md
 local_deployed_file_hashes:
-  .agents/skills/copilot/SKILL.md: sha256:5a39ac34198c9919228ecb628f57ba619b8a1484fd2be3799a17506de579a2d4
+  .agents/skills/copilot/SKILL.md: sha256:5af0ad8ae213b4f6f27ccdcc13a4ff43453dfda6e6fb0556c57b053638b672b6
   .agents/skills/copilot/scripts/open-pane.sh: sha256:270de1dc192db2d7c38a1b2a33df954a2617819fb31b7aa653785567107c9cd0
   .agents/skills/copilot/scripts/watch.sh: sha256:0419dd8a62e71a11557f8e1fe7922d7130ce554accc9bf86691d157837dbea65
   .agents/skills/review-assistant/SKILL.md: sha256:32b9c11501042cb3d691c94c8b1a4a9118ee6a469e55216f9f5307003dfa2e77
@@ -679,7 +679,7 @@ local_deployed_file_hashes:
   .agents/skills/skill-creator/references/one-case-per-reference-file.md: sha256:7a826e63005535dccde2ae7464528bc6bd6f1abb9c25dc9ffe1356073a4c8ea1
   .agents/skills/skill-creator/references/validation.md: sha256:e2b9484a063f16e139308503f1737fa5115a68dbe97915f0b34b043aad543747
   .agents/skills/skill-creator/references/worked-example.md: sha256:115917dc11e47eb2587b37b0e23b616b98a0813756f2c31ce870aec6e191e59a
-  .claude/skills/copilot/SKILL.md: sha256:5a39ac34198c9919228ecb628f57ba619b8a1484fd2be3799a17506de579a2d4
+  .claude/skills/copilot/SKILL.md: sha256:5af0ad8ae213b4f6f27ccdcc13a4ff43453dfda6e6fb0556c57b053638b672b6
   .claude/skills/copilot/scripts/open-pane.sh: sha256:270de1dc192db2d7c38a1b2a33df954a2617819fb31b7aa653785567107c9cd0
   .claude/skills/copilot/scripts/watch.sh: sha256:0419dd8a62e71a11557f8e1fe7922d7130ce554accc9bf86691d157837dbea65
   .claude/skills/review-assistant/SKILL.md: sha256:32b9c11501042cb3d691c94c8b1a4a9118ee6a469e55216f9f5307003dfa2e77
