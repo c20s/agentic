@@ -7,7 +7,7 @@ const SKIP_SOURCES = new Set(["message", "template", "merge", "squash"]);
 const buildPrompt = (filePaths: string, diff: string): string =>
   `Generate a git commit message in Conventional Commits format (type(scope): summary).
 Infer the type (feat, fix, chore, refactor, docs, test, style, perf, build, ci) and scope from the changed file paths and the diff content below.
-Output ONLY the commit message, no explanation, no markdown fences.
+Output ONLY the commit message, no explanation, no markdown fences. Always write a body row with a summary of the changes.
 
 Changed files:
 ${filePaths}
