@@ -130,6 +130,7 @@ Parameterized templates, filled via `apm run --param key=value`.
 | Command | Effect |
 |---|---|
 | `apm install` | Resolve `apm.yml`, deploy primitives to every detected agent client |
+| `apm install -g c20s/agentic#<version>` | Instal agentic skills globally pinned to a specific version |
 | `apm compile -t claude` | Compile `.apm/` into Claude Code's expected output format |
 | `apm compile --validate` | Validate frontmatter/structure without deploying |
 | `apm audit` | Scan for hidden-Unicode / supply-chain issues, detect drift between compiled output and working tree |
