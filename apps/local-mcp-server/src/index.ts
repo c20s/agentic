@@ -30,13 +30,13 @@ for (const tool of allTools) {
       logger.toolCall(tool.name, args);
       try {
         const result = await tool.handler(args, sandbox);
-        logger.toolResult(tool.name, Math.round(performance.now() - start), result);
+        logger.toolResult(tool.name, args, Math.round(performance.now() - start), result);
         return {
           content: [{ type: "text" as const, text: result }],
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.toolError(tool.name, Math.round(performance.now() - start), message);
+        logger.toolError(tool.name, args, Math.round(performance.now() - start), message);
         return {
           content: [{ type: "text" as const, text: `Error: ${message}` }],
           isError: true,

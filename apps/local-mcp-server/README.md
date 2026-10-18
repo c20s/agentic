@@ -142,11 +142,38 @@ Instead, the server logs every tool call to **two** colorized, append-only
 log files:
 
 - **Summary log** (`~/.claude/mcp-local-fs.summary.log`) – one compact line
-  per call: session id, tool name, result size in bytes, duration, ok/error.
-  Good for a quick, high-level overview of activity.
-- **Detail log** (`~/.claude/mcp-local-fs.log`) – same as the summary, plus
-  the full arguments and a preview of the result/error for every call. Good
-  for debugging exactly what an agent read, searched for, or wrote.
+  per call: session id, tool name, a short best-effort argument summary
+  (e.g. the file path for `read_file`/`write_file`/`edit_file`, the query for
+  `search_files`, the pattern for `find_files`), result size in bytes,
+  duration, ok/error. Good for a quick, high-level overview of activity
+  without needing the detail log.
+- **Detail log** (`~/.claude/mcp-local-fs.log`) – full arguments and a
+  preview of the result/error for every call. Good for debugging exactly
+  what an agent read, searched for, or wrote.
+
+The byte count in both logs is the size of the **result returned to the
+client** (i.e. the tool's output), not the size of the request/arguments —
+e.g. for `read_file` it's the size of the outline/symbol/full content
+actually sent back, for `write_file`/`edit_file` it's the size of the
+confirmation message, not the file written.
+
+The argument summary on the summary log is deliberately short (truncated to
+~110 chars, from the front for both file paths and search queries, so the
+file name — or the end of a long query/pattern — stays visible rather than
+being silently cut off) — it's meant to answer "what was this call roughly
+about" at a glance, not to replace the detail log. For example:
+
+```
+ok    read_file          829B    17ms  command-api/packages/member-context/src/app-commands/invite-member-command.ts
+ok    read_file          288B     5ms  command-api/packages/member-context/src/app-commands/invite-member-command.ts (symbol:inviteMember)
+ok    search_files       360B    11ms  "logInvited"
+ok    read_file         7763B     1ms  pnpm-lock.yaml (full)
+```
+
+Note the `(symbol:...)` / `(full)` suffixes on `read_file` lines — these make
+it possible to tell at a glance whether a call fetched the outline, a
+specific symbol, or the entire file, which otherwise looks identical in the
+summary log (same tool name, same path).
 
 Since the server runs over stdio, each Claude Code session spawns its own
 server process — so "session" here means one server process instance,
