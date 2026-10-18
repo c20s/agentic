@@ -8,6 +8,7 @@ import {
   extractMarkdownSection,
   extractTsSymbolSource,
   extractJsonValueAtPath,
+  extractYamlValueAtPath,
 } from "./outline";
 
 // Filtyper/mappar vi aldrig vill lista eller läsa av misstag (brus/hemligheter).
@@ -91,7 +92,7 @@ const readFileSchema = z.object({
     .describe(
       "Hämta hela filinnehållet rakt av, utan outline-förkortning. " +
         "ANVÄND SPARSAMT: läs först utan 'full' (du får en outline), och hämta sen specifika " +
-        "delar med 'symbol'. För filer större än ~4KB av outline-bar typ (.md/.ts/.json) " +
+        "delar med 'symbol'. För filer större än ~4KB av outline-bar typ (.md/.ts/.json/.yaml) " +
         "krävs dessutom 'reason' tillsammans med full:true."
     ),
   reason: z
@@ -109,7 +110,7 @@ const readFileSchema = z.object({
       "Hämta bara en specifik del av filen istället för hela outlinen: " +
         "för .md en rubriksektion (matchas mot rubriktext, substring/case-insensitive), " +
         "för .ts/.tsx/.js/.jsx ett symbolnamn (funktion/const/interface/type/class/enum, hela källkoden inkl. body), " +
-        "för .json en nyckel-path (t.ex. 'foo.bar.baz' eller 'items[0].name')."
+        "för .json/.yaml/.yml en nyckel-path (t.ex. 'foo.bar.baz' eller 'items[0].name')."
     ),
 });
 
@@ -120,7 +121,7 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
     "Default (ingen 'full' eller 'symbol' angiven): returnerar en kompakt OUTLINE istället för hela filen: " +
     "för .md alla rubriker/underrubriker med radnummer, " +
     "för .ts/.tsx/.js/.jsx alla top-level const/function/interface/type/class/enum-signaturer utan body, " +
-    "för .json alla nyckel-paths rekursivt (t.ex. foo.bar.baz, foo.bar, foo). " +
+    "för .json/.yaml/.yml alla nyckel-paths rekursivt (t.ex. foo.bar.baz, foo.bar, foo). " +
     "Övriga filtyper returneras i sin helhet som vanligt. " +
     "Ange 'symbol' för att hämta en specifik del (rubriksektion/funktion/nyckelvärde), eller 'full: true' för hela filen.",
   inputSchema: readFileSchema,
@@ -171,8 +172,9 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
         }
         return source;
       }
-      if (kind === "json") {
-        const value = extractJsonValueAtPath(content, symbol);
+      if (kind === "json" || kind === "yaml") {
+        const value =
+          kind === "json" ? extractJsonValueAtPath(content, symbol) : extractYamlValueAtPath(content, symbol);
         if (value === undefined) {
           throw new Error(
             `Ingen nyckel-path "${symbol}" hittades i ${path}. Använd read_file utan 'symbol' för att se outlinen (alla nyckel-paths).`
@@ -181,7 +183,7 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
         return typeof value === "string" ? value : JSON.stringify(value, null, 2);
       }
       throw new Error(
-        `"symbol" stöds bara för .md, .ts/.tsx/.js/.jsx och .json-filer. ${path} har ingen outline-typ — använd read_file utan 'symbol' (eller med 'full: true') för att läsa hela filen.`
+        `"symbol" stöds bara för .md, .ts/.tsx/.js/.jsx, .json och .yaml/.yml-filer. ${path} har ingen outline-typ — använd read_file utan 'symbol' (eller med 'full: true') för att läsa hela filen.`
       );
     }
 
@@ -384,7 +386,12 @@ const writeFileSchema = z.object({
 export const writeFileTool: ToolDefinition<typeof writeFileSchema> = {
   name: "write_file",
   description:
-    "Skriv (skapa eller skriv över) en fil inom sandboxen med nytt innehåll. Detta är det ENDA verktyget som får göra ändringar på disk.",
+    "Skriv (skapa eller skriv över) en fil inom sandboxen med HELA filinnehållet på en gång. " +
+    "VARNING: detta ersätter filens fulla innehåll — om du bara vill ändra en del av en befintlig fil " +
+    "(t.ex. en funktion, en rad, lägga till en import) ska du använda edit_file istället, som gör en " +
+    "riktad ändring utan att du behöver känna till eller skicka med hela filens innehåll. " +
+    "Använd write_file för att SKAPA en ny fil, eller när du medvetet vill ersätta en fils fulla innehåll " +
+    "och du faktiskt har läst hela filen (full:true) först.",
   inputSchema: writeFileSchema,
   handler: async ({ path, content, createDirs }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -396,6 +403,86 @@ export const writeFileTool: ToolDefinition<typeof writeFileSchema> = {
   },
 };
 
+const editFileSchema = z.object({
+  path: z.string().describe("Sökväg till filen som ska ändras, relativt sandbox-roten. Filen måste redan finnas."),
+  oldString: z
+    .string()
+    .describe(
+      "Den exakta textsträngen som ska bytas ut (inkl. whitespace/indentering). Måste matcha EXAKT en gång " +
+        "i filen, annars avvisas ändringen (se replaceAll för flera förekomster)."
+    ),
+  newString: z.string().describe("Texten som ska ersätta oldString."),
+  replaceAll: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Om true: ersätt ALLA förekomster av oldString istället för att kräva exakt en match. " +
+        "Använd med försiktighet — default false kräver exakt en match för att undvika oavsiktliga ändringar."
+    ),
+});
+
+export const editFileTool: ToolDefinition<typeof editFileSchema> = {
+  name: "edit_file",
+  description:
+    "Gör en RIKTAD ändring i en befintlig fil genom sök-och-ersätt (oldString → newString), utan att behöva " +
+    "känna till eller skicka med hela filens innehåll. Detta är det FÖREDRAGNA sättet att ändra en befintlig " +
+    "fil — använd detta istället för write_file när du bara ska lägga till/ändra/ta bort en avgränsad del " +
+    "(t.ex. lägga till en import, ändra en funktions body, lägga till en ny export). " +
+    "oldString måste matcha exakt en gång i filen (om inte replaceAll:true används) — detta är en säkerhetsspärr " +
+    "så att en ändring aldrig träffar fel ställe eller råkar skriva över något du inte sett. " +
+    "Om du är osäker på den exakta nuvarande texten: läs filen (eller relevant symbol/sektion) med read_file först.",
+  inputSchema: editFileSchema,
+  handler: async ({ path, oldString, newString, replaceAll }, sandbox) => {
+    const abs = sandbox.resolve(path);
+    let st;
+    try {
+      st = await stat(abs);
+    } catch {
+      throw new Error(
+        `"${path}" finns inte. edit_file kan bara ändra befintliga filer — använd write_file för att skapa en ny fil.`
+      );
+    }
+    if (st.isDirectory()) {
+      throw new Error(`"${path}" är en mapp, inte en fil.`);
+    }
+    if (st.size > MAX_READ_BYTES) {
+      throw new Error(`Filen är för stor (${st.size} bytes, max ${MAX_READ_BYTES}) för edit_file.`);
+    }
+
+    const content = await readFile(abs, "utf-8");
+
+    if (oldString === newString) {
+      throw new Error("oldString och newString är identiska — ingen ändring att göra.");
+    }
+
+    const occurrences = content.split(oldString).length - 1;
+
+    if (occurrences === 0) {
+      throw new Error(
+        `Hittade ingen förekomst av den angivna oldString i ${path}. ` +
+          `Kontrollera att texten matchar exakt (inkl. whitespace/indentering) — läs filen/symbolen igen för att se exakt nuvarande innehåll.`
+      );
+    }
+
+    if (occurrences > 1 && !replaceAll) {
+      throw new Error(
+        `oldString matchar ${occurrences} ställen i ${path}, inte exakt ett. ` +
+          `Gör oldString mer specifik (t.ex. inkludera mer omgivande kontext) så den bara matchar en gång, ` +
+          `eller skicka med replaceAll:true om du medvetet vill ersätta alla förekomster.`
+      );
+    }
+
+    const newContent = replaceAll
+      ? content.split(oldString).join(newString)
+      : content.replace(oldString, newString);
+
+    await writeFile(abs, newContent, "utf-8");
+
+    const verb = occurrences > 1 ? `${occurrences} förekomster` : "1 förekomst";
+    return `Ersatte ${verb} i ${sandbox.toRelative(abs)} (${Buffer.byteLength(newContent, "utf-8")} bytes totalt efter ändring).`;
+  },
+};
+
 export const allTools = [
   listDirTool,
   readFileTool,
@@ -403,4 +490,5 @@ export const allTools = [
   searchFilesTool,
   findFilesTool,
   writeFileTool,
+  editFileTool,
 ];

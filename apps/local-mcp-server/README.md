@@ -41,9 +41,18 @@ filtyper — istället en kompakt outline, för att spara context:
 | Filtyp | Default-output |
 |---|---|
 | `.md` / `.mdx` | Alla rubriker/underrubriker med radnummer och indrag efter nivå |
-| `.ts` / `.tsx` / `.js` / `.jsx` | Alla top-level `const`/`function`/`interface`/`type`/`class`/`enum`, med signatur men **utan body** (riktig TS-AST-parsning, inte regex) |
+| `.ts` / `.tsx` / `.js` / `.jsx` | Alla top-level `import`/`const`/`function`/`interface`/`type`/`class`/`enum`, med signatur men **utan body** (riktig TS-AST-parsning, inte regex) |
 | `.json` / `.jsonc` | Alla nyckel-paths rekursivt, t.ex. `foo`, `foo.bar`, `foo.bar.baz`, `items[0].name` |
+| `.yaml` / `.yml` | Samma som JSON ovan — alla nyckel-paths rekursivt (parsas med `Bun.YAML`, inbyggt i Bun) |
 | Övriga filtyper | Hela filen, som vanligt |
+
+**Täckningsgaranti för TS/JS-outline:** om en fil innehåller top-level-kod som
+inte är en känd deklarationstyp (t.ex. ett löst `console.log(...)`, en IIFE,
+eller annan "lös" kod direkt i filen), markeras den som `other` i outline
+**och** en explicit varning läggs till i svaret: outline är då INTE en
+fullständig representation av filen. Filer utan sådan lös kod får ingen
+varning — outline-listan (inkl. imports) täcker då verkligen allt på
+top-level i filen.
 
 Två sätt att få mer:
 
@@ -52,8 +61,8 @@ Två sätt att få mer:
     sektionen (till nästa rubrik på samma eller högre nivå)
   - `.ts`/`.js` m.fl.: matchar ett symbolnamn → hela källkoden **inklusive
     body**
-  - `.json`: en nyckel-path (t.ex. `"foo.bar.baz"` eller `"items[0].name"`)
-    → värdet på den pathen
+  - `.json`/`.yaml`/`.yml`: en nyckel-path (t.ex. `"foo.bar.baz"` eller
+    `"items[0].name"`) → värdet på den pathen
 - **`full: true`** – hoppa över outline-logiken helt, hämta hela filen rakt av
   (oavsett filtyp).
 
@@ -62,14 +71,41 @@ med alla top-level-symboler → läser sen `read_file({ path: "src/tools.ts",
 symbol: "writeFileTool" })` för att få just den funktionens/konstantens
 fullständiga källkod.
 
-Write (den enda vägen att ändra något):
+Write (de enda vägarna att ändra något):
 
-- `write_file` – skriv/skapa en fil med fullständigt nytt innehåll
+- `edit_file` – **föredraget** sätt att ändra en befintlig fil: riktad
+  sök-och-ersätt (`oldString` → `newString`) utan att behöva känna till eller
+  skicka med hela filens innehåll. `oldString` måste matcha exakt en gång
+  (säkerhetsspärr mot tvetydiga ändringar), om inte `replaceAll: true` anges.
+- `write_file` – skriv/skapa en fil med **fullständigt** nytt innehåll (hela
+  filen skrivs över). Använd för att skapa nya filer, eller när du medvetet
+  vill ersätta en hel fil och faktiskt har läst den i sin helhet (`full:
+  true`) först.
 
 Det finns **inget** verktyg för att ta bort filer, köra skal-kommandon, flytta
 filer, osv. Om du vill utöka servern med fler skrivoperationer, lägg till dem
 explicit i `src/tools.ts` och tänk igenom konsekvenserna — håll gärna skriv-ytan
 så smal som möjligt.
+
+### Varför både `edit_file` och `write_file`?
+
+Outline-läget (ovan) är utmärkt för att **läsa/förstå** kod effektivt, men det
+är en partiell vy av filen. Eftersom `write_file` skriver över HELA filen,
+skulle en skrivning baserad enbart på en partiell läsning riskera att tappa
+bort kod agenten aldrig såg (imports den inteläste, kommentarer, lös kod,
+exakt formatering, etc.).
+
+`edit_file` löser detta: det kräver bara den exakta biten som ska ändras
+(`oldString`/`newString`), aldrig hela filen. Det gör att agenten kan göra
+helt riktade ändringar — lägga till en import, ändra en funktions body, lägga
+till en ny export — utan att någonsin behöva läsa eller skriva om resten av
+filen den inte brydde sig om.
+
+Rekommenderat flöde för agenten:
+1. `read_file` (outline eller `symbol`) för att hitta och förstå rätt ställe
+2. `edit_file` för att göra den riktade ändringen
+3. `write_file` bara när en helt ny fil ska skapas, eller när hela filen
+   medvetet ska ersättas (efter `full: true`-läsning)
 
 ## Sandbox
 
@@ -250,7 +286,7 @@ explicit med `--disallowedTools`.
    ```
 
    Förväntat svar: enbart `mcp__local-fs__list_dir`, `read_file`, `file_stat`,
-   `search_files`, `find_files` och `write_file`.
+   `search_files`, `find_files`, `edit_file` och `write_file`.
 
    **Viktigt att komma ihåg:** en vanlig, oinskränkt `claude`-session (utan
    `--bare`/`--disallowedTools`) har fortfarande fulla `Bash`/`Edit`/`Read`/

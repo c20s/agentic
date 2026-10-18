@@ -71,11 +71,24 @@ export function extractMarkdownSection(content: string, headingQuery: string): s
 // ---------------------------------------------------------------------------
 
 export interface TsSymbol {
-  kind: string; // "function" | "const" | "interface" | "type" | "class" | "enum" | "export"
+  kind: string; // "import" | "function" | "const" | "interface" | "type" | "class" | "enum" | "export" | "other"
   name: string;
   signature: string; // en rad, utan body
   line: number; // 1-indexerat
   exported: boolean;
+}
+
+export interface TsOutlineResult {
+  symbols: TsSymbol[];
+  /**
+   * true om varje top-level statement i filen kunde kategoriseras som en
+   * känd symbol-typ ("other" räknas INTE som fullt kategoriserad). false
+   * betyder att outline inte ger full täckning av filen — det finns
+   * top-level-kod (löst uttryck, IIFE, etc.) som inte syns i outline-listan,
+   * och man bör då vara extra försiktig med att skriva om filen utan att
+   * läsa den i sin helhet (full:true) först.
+   */
+  fullyCovered: boolean;
 }
 
 function getLeadingExport(node: ts.Node): boolean {
@@ -83,7 +96,7 @@ function getLeadingExport(node: ts.Node): boolean {
   return !!mods?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
 }
 
-export function extractTsOutline(content: string, fileName: string): TsSymbol[] {
+export function extractTsOutline(content: string, fileName: string): TsOutlineResult {
   const sourceFile = ts.createSourceFile(
     fileName,
     content,
@@ -93,6 +106,7 @@ export function extractTsOutline(content: string, fileName: string): TsSymbol[] 
   );
 
   const symbols: TsSymbol[] = [];
+  let fullyCovered = true;
 
   function lineOf(node: ts.Node): number {
     return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
@@ -107,8 +121,30 @@ export function extractTsOutline(content: string, fileName: string): TsSymbol[] 
     return header.replace(/\s+/g, " ").trim();
   }
 
+  // Komprimerar en lång rad (t.ex. en lång import-sats) till en läsbar enrads-sammanfattning.
+  function oneLine(node: ts.Node): string {
+    return node.getText(sourceFile).replace(/\s+/g, " ").trim();
+  }
+
   sourceFile.forEachChild((node) => {
-    if (ts.isFunctionDeclaration(node) && node.name) {
+    if (ts.isImportDeclaration(node)) {
+      const moduleSpecifier = node.moduleSpecifier.getText(sourceFile);
+      symbols.push({
+        kind: "import",
+        name: moduleSpecifier.replace(/^["']|["']$/g, ""),
+        signature: oneLine(node),
+        line: lineOf(node),
+        exported: false,
+      });
+    } else if (ts.isImportEqualsDeclaration(node)) {
+      symbols.push({
+        kind: "import",
+        name: node.name.text,
+        signature: oneLine(node),
+        line: lineOf(node),
+        exported: false,
+      });
+    } else if (ts.isFunctionDeclaration(node) && node.name) {
       symbols.push({
         kind: "function",
         name: node.name.text,
@@ -179,22 +215,49 @@ export function extractTsOutline(content: string, fileName: string): TsSymbol[] 
     } else if (ts.isExportDeclaration(node)) {
       symbols.push({
         kind: "export",
-        name: node.getText(sourceFile).replace(/\s+/g, " ").trim(),
-        signature: node.getText(sourceFile).replace(/\s+/g, " ").trim(),
+        name: oneLine(node),
+        signature: oneLine(node),
         line: lineOf(node),
         exported: true,
+      });
+    } else if (node.kind === ts.SyntaxKind.EndOfFileToken) {
+      // inget att göra, inte ett riktigt statement
+    } else {
+      // Okänt top-level statement: löst uttryck, IIFE, bar console.log, etc.
+      // Detta är PRECIS den typen av kod som outline annars skulle dölja helt.
+      fullyCovered = false;
+      const text = oneLine(node);
+      symbols.push({
+        kind: "other",
+        name: "(okategoriserad kod)",
+        signature: text.length > 120 ? text.slice(0, 120) + "…" : text,
+        line: lineOf(node),
+        exported: false,
       });
     }
   });
 
-  return symbols;
+  return { symbols, fullyCovered };
 }
 
-export function formatTsOutline(symbols: TsSymbol[]): string {
-  if (symbols.length === 0) return "(inga top-level symboler hittades)";
-  return symbols
-    .map((s) => `${s.line}: ${s.exported ? "export " : ""}${s.kind} ${s.name} — ${s.signature}`)
-    .join("\n");
+export function formatTsOutline(result: TsOutlineResult): string {
+  const { symbols, fullyCovered } = result;
+  if (symbols.length === 0) return "(inga top-level symboler hittades — troligen en tom fil)";
+
+  const lines = symbols.map(
+    (s) => `${s.line}: ${s.exported ? "export " : ""}${s.kind} ${s.name} — ${s.signature}`
+  );
+
+  if (!fullyCovered) {
+    lines.push(
+      "",
+      "⚠️  VARNING: denna fil innehåller top-level-kod som INTE syns ovan (markerad 'other' om den finns i listan, " +
+        "eller på annat sätt okategoriserad). Outline är INTE en fullständig representation av filen. " +
+        "Läs med full:true (+ reason) innan du skriver om filen med write_file, annars riskerar du att tappa bort kod."
+    );
+  }
+
+  return lines.join("\n");
 }
 
 /**
@@ -240,12 +303,13 @@ export function extractTsSymbolSource(content: string, fileName: string, symbolN
 }
 
 // ---------------------------------------------------------------------------
-// JSON: alla nyckel-paths rekursivt, t.ex. foo.bar.baz, foo.bar, foo, osv.
-// Arrayer representeras med [i] i pathen.
+// JSON & YAML: alla nyckel-paths rekursivt, t.ex. foo.bar.baz, foo.bar, foo.
+// Arrayer representeras med [i] i pathen. Samma logik funkar för båda
+// formaten eftersom de bara skiljer sig i parsing (JSON.parse vs Bun.YAML.parse)
+// — resultatet är samma typ av nästlad JS-data.
 // ---------------------------------------------------------------------------
 
-export function extractJsonKeyPaths(content: string): string[] {
-  const data = JSON.parse(content);
+function keyPathsOf(data: unknown): string[] {
   const paths: string[] = [];
 
   function walk(value: unknown, prefix: string) {
@@ -264,22 +328,10 @@ export function extractJsonKeyPaths(content: string): string[] {
   }
 
   walk(data, "");
-  // Ta bort ev. tom root-path, och "" om top-level inte var objekt/array.
   return paths.filter((p) => p.length > 0);
 }
 
-export function formatJsonOutline(paths: string[]): string {
-  if (paths.length === 0) return "(inga nycklar hittades, troligen en primitiv top-level-värde)";
-  return paths.join("\n");
-}
-
-/**
- * Hämtar värdet på en specifik key-path i en JSON-fil, t.ex. "foo.bar.baz"
- * eller "items[0].name". Returnerar undefined om pathen inte finns.
- */
-export function extractJsonValueAtPath(content: string, path: string): unknown {
-  const data = JSON.parse(content);
-  // Dela upp "foo.bar[0].baz" i segment: ["foo", "bar", "0", "baz"]
+function valueAtPath(data: unknown, path: string): unknown {
   const segments = path
     .replace(/\[(\d+)\]/g, ".$1")
     .split(".")
@@ -294,11 +346,42 @@ export function extractJsonValueAtPath(content: string, path: string): unknown {
   return current;
 }
 
+export function extractJsonKeyPaths(content: string): string[] {
+  return keyPathsOf(JSON.parse(content));
+}
+
+export function formatJsonOutline(paths: string[]): string {
+  if (paths.length === 0) return "(inga nycklar hittades, troligen en primitiv top-level-värde)";
+  return paths.join("\n");
+}
+
+export function extractYamlKeyPaths(content: string): string[] {
+  return keyPathsOf(Bun.YAML.parse(content));
+}
+
+export function formatYamlOutline(paths: string[]): string {
+  if (paths.length === 0) return "(inga nycklar hittades, troligen en primitiv top-level-värde)";
+  return paths.join("\n");
+}
+
+/**
+ * Hämtar värdet på en specifik key-path i en JSON-fil, t.ex. "foo.bar.baz"
+ * eller "items[0].name". Returnerar undefined om pathen inte finns.
+ */
+export function extractJsonValueAtPath(content: string, path: string): unknown {
+  return valueAtPath(JSON.parse(content), path);
+}
+
+/** Samma som extractJsonValueAtPath, men för YAML-filer. */
+export function extractYamlValueAtPath(content: string, path: string): unknown {
+  return valueAtPath(Bun.YAML.parse(content), path);
+}
+
 // ---------------------------------------------------------------------------
 // Dispatcher: avgör om/hur en fil ska outline:as baserat på filändelse.
 // ---------------------------------------------------------------------------
 
-export type OutlineKind = "markdown" | "typescript" | "json" | null;
+export type OutlineKind = "markdown" | "typescript" | "json" | "yaml" | null;
 
 export function outlineKindForFile(fileName: string): OutlineKind {
   const ext = extname(fileName).toLowerCase();
@@ -307,6 +390,7 @@ export function outlineKindForFile(fileName: string): OutlineKind {
     return "typescript";
   }
   if (ext === ".json" || ext === ".jsonc") return "json";
+  if (ext === ".yaml" || ext === ".yml") return "yaml";
   return null;
 }
 
@@ -320,6 +404,8 @@ export function buildOutline(content: string, fileName: string): string {
       return formatTsOutline(extractTsOutline(content, fileName));
     case "json":
       return formatJsonOutline(extractJsonKeyPaths(content));
+    case "yaml":
+      return formatYamlOutline(extractYamlKeyPaths(content));
     case null:
       return content; // okänd filtyp: ingen outline, hela innehållet
   }
