@@ -11,7 +11,7 @@ import {
   extractYamlValueAtPath,
 } from "./outline";
 
-// Filtyper/mappar vi aldrig vill lista eller läsa av misstag (brus/hemligheter).
+// File types/directories we never want to list or read by accident (noise/secrets).
 const DEFAULT_IGNORES = new Set([
   "node_modules",
   ".git",
@@ -22,7 +22,7 @@ const DEFAULT_IGNORES = new Set([
   ".turbo",
 ]);
 
-const MAX_READ_BYTES = 1_000_000; // ~1MB skydd mot att råka läsa jättefiler
+const MAX_READ_BYTES = 1_000_000; // ~1MB guard against accidentally reading huge files
 const MAX_LIST_ENTRIES = 2000;
 const MAX_SEARCH_RESULTS = 200;
 
@@ -38,18 +38,18 @@ export interface ToolDefinition<Schema extends z.ZodTypeAny> {
 }
 
 // ---------------------------------------------------------------------------
-// READ-ONLY CONTEXT-VERKTYG
+// READ-ONLY CONTEXT TOOLS
 // ---------------------------------------------------------------------------
 
 const listDirSchema = z.object({
-  path: z.string().default(".").describe("Mapp att lista, relativt sandbox-roten. Default '.'"),
-  recursive: z.boolean().default(false).describe("Lista rekursivt (max djup 6)."),
+  path: z.string().default(".").describe("Directory to list, relative to the sandbox root. Default '.'"),
+  recursive: z.boolean().default(false).describe("List recursively (max depth 6)."),
 });
 
 export const listDirTool: ToolDefinition<typeof listDirSchema> = {
   name: "list_dir",
   description:
-    "Lista filer och mappar inom sandboxen. Read-only. Använd detta för att utforska projektstrukturen.",
+    "List files and directories within the sandbox. Read-only. Use this to explore the project structure.",
   inputSchema: listDirSchema,
   handler: async ({ path, recursive }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -64,7 +64,7 @@ export const listDirTool: ToolDefinition<typeof listDirSchema> = {
         const rel = relative(sandbox.root, full);
         results.push(entry.isDirectory() ? `${rel}/` : rel);
         if (results.length >= MAX_LIST_ENTRIES) {
-          results.push(`... (fler än ${MAX_LIST_ENTRIES} resultat, avkortat)`);
+          results.push(`... (more than ${MAX_LIST_ENTRIES} results, truncated)`);
           return;
         }
         if (recursive && entry.isDirectory()) {
@@ -74,66 +74,72 @@ export const listDirTool: ToolDefinition<typeof listDirSchema> = {
     }
 
     await walk(abs, 0);
-    return results.length > 0 ? results.join("\n") : "(tom mapp)";
+    return results.length > 0 ? results.join("\n") : "(empty directory)";
   },
 };
 
-// Under denna gräns spelar outline mindre roll (filen är redan liten),
-// så vi tillåter full:true fritt. Över gränsen krävs en uttrycklig "reason"
-// för att undvika att agenten slentrianmässigt alltid kör full:true och
-// därmed gör hela outline-funktionen meningslös.
+// Below this threshold, outline matters less (the file is already small),
+// so we allow full:true freely. Above the threshold, an explicit "reason"
+// is required to avoid the agent routinely always running full:true and
+// thereby making the whole outline feature pointless.
 const FULL_READ_FREE_THRESHOLD_BYTES = 4_000;
 
 const readFileSchema = z.object({
-  path: z.string().describe("Sökväg till filen, relativt sandbox-roten."),
+  path: z.string().describe("Path to the file, relative to the sandbox root."),
   full: z
     .boolean()
     .default(false)
     .describe(
-      "Hämta hela filinnehållet rakt av, utan outline-förkortning. " +
-        "ANVÄND SPARSAMT: läs först utan 'full' (du får en outline), och hämta sen specifika " +
-        "delar med 'symbol'. För filer större än ~4KB av outline-bar typ (.md/.ts/.json/.yaml) " +
-        "krävs dessutom 'reason' tillsammans med full:true."
+      "Get the entire file content as-is, without outline shortening. " +
+        "USE SPARINGLY: read without 'full' first (you get an outline), then fetch specific " +
+        "parts with 'symbol'. For files larger than ~4KB of an outlineable type (.md/.ts/.json/.yaml), " +
+        "'reason' is also required together with full:true."
     ),
   reason: z
     .string()
     .optional()
     .describe(
-      "Krävs bara om full:true används på en fil >4KB av outline-bar typ: en kort motivering " +
-        "till varför du behöver hela filinnehållet istället för outline/symbol (t.ex. " +
-        "'behöver se hela filens kontext för en stor refaktor')."
+      "Only required if full:true is used on a file >4KB of an outlineable type: a short justification " +
+        "for why you need the entire file content instead of outline/symbol (e.g. " +
+        "'need to see the whole file context for a large refactor')."
     ),
   symbol: z
     .string()
     .optional()
     .describe(
-      "Hämta bara en specifik del av filen istället för hela outlinen: " +
-        "för .md en rubriksektion (matchas mot rubriktext, substring/case-insensitive), " +
-        "för .ts/.tsx/.js/.jsx ett symbolnamn (funktion/const/interface/type/class/enum, hela källkoden inkl. body), " +
-        "för .json/.yaml/.yml en nyckel-path (t.ex. 'foo.bar.baz' eller 'items[0].name')."
+      "Fetch just a specific part of the file instead of the whole outline: " +
+        "for .md a heading section (matched against heading text, substring/case-insensitive), " +
+        "for .ts/.tsx/.js/.jsx a symbol name (function/const/interface/type/class/enum, full source code incl. body; " +
+        "for imports you can match on the module path, a substring of it, or an imported name, e.g. 'create' or 'member.create'), " +
+        "for .json/.yaml/.yml a key path (e.g. 'foo.bar.baz' or 'items[0].name')."
     ),
 });
 
 export const readFileTool: ToolDefinition<typeof readFileSchema> = {
   name: "read_file",
   description:
-    "Läs innehållet i en textfil inom sandboxen. Read-only. Detta är den primära vägen för agenten att få context. " +
-    "Default (ingen 'full' eller 'symbol' angiven): returnerar en kompakt OUTLINE istället för hela filen: " +
-    "för .md alla rubriker/underrubriker med radnummer, " +
-    "för .ts/.tsx/.js/.jsx alla top-level const/function/interface/type/class/enum-signaturer utan body, " +
-    "för .json/.yaml/.yml alla nyckel-paths rekursivt (t.ex. foo.bar.baz, foo.bar, foo). " +
-    "Övriga filtyper returneras i sin helhet som vanligt. " +
-    "Ange 'symbol' för att hämta en specifik del (rubriksektion/funktion/nyckelvärde), eller 'full: true' för hela filen.",
+    "Read the content of a text file within the sandbox. Read-only. This is the primary way for the agent to get context. " +
+    "Default (no 'full' or 'symbol' given): returns a compact OUTLINE instead of the whole file: " +
+    "for .md all headings/subheadings with line numbers, " +
+    "for .ts/.tsx/.js/.jsx all top-level const/function/interface/type/class/enum signatures without body, " +
+    "for .json/.yaml/.yml all key paths recursively (e.g. foo.bar.baz, foo.bar, foo). " +
+    "Other file types are returned in full as usual. " +
+    "Pass 'symbol' to fetch a specific part (heading section/function/key value), or 'full: true' for the entire file.",
   inputSchema: readFileSchema,
   handler: async ({ path, full, reason, symbol }, sandbox) => {
     const abs = sandbox.resolve(path);
-    const st = await stat(abs);
+    let st;
+    try {
+      st = await stat(abs);
+    } catch {
+      throw new Error(`"${path}" does not exist.`);
+    }
     if (st.isDirectory()) {
-      throw new Error(`"${path}" är en mapp, inte en fil. Använd list_dir istället.`);
+      throw new Error(`"${path}" is a directory, not a file. Use list_dir instead.`);
     }
     if (st.size > MAX_READ_BYTES) {
       throw new Error(
-        `Filen är för stor (${st.size} bytes, max ${MAX_READ_BYTES}). Läs via search_files istället.`
+        `File is too large (${st.size} bytes, max ${MAX_READ_BYTES}). Read via search_files instead.`
       );
     }
     const content = await readFile(abs, "utf-8");
@@ -144,10 +150,10 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
       const isLarge = st.size > FULL_READ_FREE_THRESHOLD_BYTES;
       if (isOutlineable && isLarge && !reason?.trim()) {
         throw new Error(
-          `"${path}" är ${st.size} bytes och stödjer outline-läge. ` +
-            `Läs först utan 'full' för att se strukturen, och hämta sen specifika delar med 'symbol'. ` +
-            `Om du verkligen behöver hela filen: skicka med 'reason' som förklarar varför ` +
-            `(t.ex. "behöver se hela filen för en stor refaktor").`
+          `"${path}" is ${st.size} bytes and supports outline mode. ` +
+            `Read without 'full' first to see the structure, then fetch specific parts with 'symbol'. ` +
+            `If you really need the whole file: pass 'reason' explaining why ` +
+            `(e.g. "need to see the whole file for a large refactor").`
         );
       }
       return content;
@@ -158,7 +164,7 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
         const section = extractMarkdownSection(content, symbol);
         if (section === null) {
           throw new Error(
-            `Ingen rubrik som matchar "${symbol}" hittades i ${path}. Använd read_file utan 'symbol' för att se outlinen (alla rubriker).`
+            `No heading matching "${symbol}" was found in ${path}. Use read_file without 'symbol' to see the outline (all headings).`
           );
         }
         return section;
@@ -167,7 +173,7 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
         const source = extractTsSymbolSource(content, abs, symbol);
         if (source === null) {
           throw new Error(
-            `Ingen top-level symbol med namnet "${symbol}" hittades i ${path}. Använd read_file utan 'symbol' för att se outlinen (alla symboler).`
+            `No top-level symbol named "${symbol}" was found in ${path}. Use read_file without 'symbol' to see the outline (all symbols).`
           );
         }
         return source;
@@ -177,37 +183,42 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
           kind === "json" ? extractJsonValueAtPath(content, symbol) : extractYamlValueAtPath(content, symbol);
         if (value === undefined) {
           throw new Error(
-            `Ingen nyckel-path "${symbol}" hittades i ${path}. Använd read_file utan 'symbol' för att se outlinen (alla nyckel-paths).`
+            `No key path "${symbol}" was found in ${path}. Use read_file without 'symbol' to see the outline (all key paths).`
           );
         }
         return typeof value === "string" ? value : JSON.stringify(value, null, 2);
       }
       throw new Error(
-        `"symbol" stöds bara för .md, .ts/.tsx/.js/.jsx, .json och .yaml/.yml-filer. ${path} har ingen outline-typ — använd read_file utan 'symbol' (eller med 'full: true') för att läsa hela filen.`
+        `"symbol" is only supported for .md, .ts/.tsx/.js/.jsx, .json and .yaml/.yml files. ${path} has no outline type — use read_file without 'symbol' (or with 'full: true') to read the whole file.`
       );
     }
 
     if (kind === null) {
-      // Okänd filtyp: ingen outline-koncept, ge hela filen direkt (som tidigare beteende).
+      // Unknown file type: no outline concept, return the whole file directly (as before).
       return content;
     }
 
     const outline = buildOutline(content, abs);
-    return `[Outline för ${path} — använd read_file med symbol:"<namn>" för en specifik del, eller full:true för hela filen]\n\n${outline}`;
+    return `[Outline for ${path} — use read_file with symbol:"<name>" for a specific part, or full:true for the whole file]\n\n${outline}`;
   },
 };
 
 const fileStatSchema = z.object({
-  path: z.string().describe("Sökväg att hämta metadata för, relativt sandbox-roten."),
+  path: z.string().describe("Path to get metadata for, relative to the sandbox root."),
 });
 
 export const fileStatTool: ToolDefinition<typeof fileStatSchema> = {
   name: "file_stat",
-  description: "Hämta metadata (storlek, typ, senast ändrad) för en fil eller mapp. Read-only.",
+  description: "Get metadata (size, type, last modified) for a file or directory. Read-only.",
   inputSchema: fileStatSchema,
   handler: async ({ path }, sandbox) => {
     const abs = sandbox.resolve(path);
-    const st = await stat(abs);
+    let st;
+    try {
+      st = await stat(abs);
+    } catch {
+      throw new Error(`"${path}" does not exist.`);
+    }
     return JSON.stringify(
       {
         path,
@@ -222,20 +233,20 @@ export const fileStatTool: ToolDefinition<typeof fileStatSchema> = {
 };
 
 const searchFilesSchema = z.object({
-  query: z.string().describe("Textsträng eller regex att söka efter i filinnehåll."),
-  path: z.string().default(".").describe("Mapp (eller fil) att söka inom, relativt sandbox-roten."),
+  query: z.string().describe("Text string or regex to search for in file content."),
+  path: z.string().default(".").describe("Directory (or file) to search within, relative to the sandbox root."),
   filePattern: z
     .string()
     .optional()
-    .describe("Valfritt glob-filter för filnamn, t.ex. '*.ts' eller '*.md' (ripgrep --glob)."),
+    .describe("Optional glob filter for file names, e.g. '*.ts' or '*.md' (ripgrep --glob)."),
   caseSensitive: z.boolean().default(false),
   regex: z
     .boolean()
     .default(false)
-    .describe("Tolka query som regex istället för ren text (default: ren textsökning)."),
+    .describe("Interpret query as regex instead of plain text (default: plain text search)."),
 });
 
-/** Kör ripgrep och samla upp stdout. Kastar fel vid rg-exitkod > 1 (1 = inga träffar, OK). */
+/** Runs ripgrep and collects stdout. Throws on rg exit code > 1 (1 = no matches, OK). */
 async function runRipgrep(args: string[], cwd: string): Promise<{ stdout: string; exitCode: number }> {
   const proc = Bun.spawn(["rg", ...args], {
     cwd,
@@ -247,9 +258,9 @@ async function runRipgrep(args: string[], cwd: string): Promise<{ stdout: string
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
-  // exitCode 0 = träffar, 1 = inga träffar (inte ett fel), 2+ = faktiskt fel (t.ex. trasig regex)
+  // exit code 0 = matches, 1 = no matches (not an error), 2+ = actual error (e.g. broken regex)
   if (exitCode >= 2) {
-    throw new Error(`ripgrep misslyckades: ${stderr.trim() || `exit code ${exitCode}`}`);
+    throw new Error(`ripgrep failed: ${stderr.trim() || `exit code ${exitCode}`}`);
   }
   return { stdout, exitCode };
 }
@@ -257,10 +268,10 @@ async function runRipgrep(args: string[], cwd: string): Promise<{ stdout: string
 export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
   name: "search_files",
   description:
-    "Sök efter text eller regex i filINNEHÅLL inom sandboxen, med ripgrep. Read-only. " +
-    "Bra för att hitta var något definieras eller används. " +
-    "OBS: detta söker i filernas innehåll, inte i filnamn — om du letar efter en fil baserat på " +
-    "dess namn/sökväg (t.ex. 'var ligger invite-member-command.ts?'), använd find_files istället.",
+    "Search for text or regex in file CONTENT within the sandbox, using ripgrep. Read-only. " +
+    "Good for finding where something is defined or used. " +
+    "NOTE: this searches file content, not file names — if you're looking for a file based on " +
+    "its name/path (e.g. 'where is invite-member-command.ts?'), use find_files instead.",
   inputSchema: searchFilesSchema,
   handler: async ({ query, path, filePattern, caseSensitive, regex }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -274,9 +285,9 @@ export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
       "--max-count",
       String(MAX_SEARCH_RESULTS),
       ...[...DEFAULT_IGNORES].flatMap((dir) => ["--glob", `!${dir}`]),
-      // -e/--regexp gör att query alltid tolkas som ett sökmönster (aldrig som
-      // flagga eller fil), oavsett om den börjar med "-" eller om --fixed-strings
-      // är satt. Positional-argumentet som blir kvar är då bara sökvägen.
+      // -e/--regexp ensures query is always interpreted as a search pattern (never as a
+      // flag or file), regardless of whether it starts with "-" or --fixed-strings is set.
+      // The remaining positional argument is then just the path.
       "--regexp",
       query,
       "--",
@@ -303,12 +314,12 @@ export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
 
       matches.push(`${rel}:${lineNumber}: ${lineText.trim()}`);
       if (matches.length >= MAX_SEARCH_RESULTS) {
-        matches.push(`... (fler än ${MAX_SEARCH_RESULTS} träffar, avkortat)`);
+        matches.push(`... (more than ${MAX_SEARCH_RESULTS} matches, truncated)`);
         break;
       }
     }
 
-    return matches.length > 0 ? matches.join("\n") : "Inga träffar.";
+    return matches.length > 0 ? matches.join("\n") : "No matches.";
   },
 };
 
@@ -316,28 +327,28 @@ const findFilesSchema = z.object({
   pattern: z
     .string()
     .describe(
-      "Glob-mönster eller substring att matcha mot FILNAMN/SÖKVÄG (inte innehåll), t.ex. " +
-        "'*.ts', '*invite*', 'src/**/*.test.ts'. Om mönstret inte innehåller något av tecknen " +
-        "* ? [ ] tolkas det som en substring-match mot hela den relativa sökvägen."
+      "Glob pattern or substring to match against FILE NAME/PATH (not content), e.g. " +
+        "'*.ts', '*invite*', 'src/**/*.test.ts'. If the pattern doesn't contain any of the characters " +
+        "* ? [ ] it's treated as a substring match against the full relative path."
     ),
-  path: z.string().default(".").describe("Mapp att söka inom, relativt sandbox-roten."),
+  path: z.string().default(".").describe("Directory to search within, relative to the sandbox root."),
   caseSensitive: z.boolean().default(false),
 });
 
 export const findFilesTool: ToolDefinition<typeof findFilesSchema> = {
   name: "find_files",
   description:
-    "Hitta filer baserat på FILNAMN/SÖKVÄG (inte innehåll) inom sandboxen, med ripgrep --files. " +
-    "Read-only. Använd detta när du vet (eller gissar) hur filen heter men inte var den ligger — " +
-    "t.ex. find_files({ pattern: '*invite*' }) för att hitta alla filer med 'invite' i namnet. " +
-    "Komplement till search_files (som söker i filINNEHÅLL) och list_dir (som kräver att du redan är i rätt mapp).",
+    "Find files based on FILE NAME/PATH (not content) within the sandbox, using ripgrep --files. " +
+    "Read-only. Use this when you know (or are guessing) a file's name but not where it lives — " +
+    "e.g. find_files({ pattern: '*invite*' }) to find all files with 'invite' in the name. " +
+    "Complements search_files (which searches file CONTENT) and list_dir (which requires you to already be in the right directory).",
   inputSchema: findFilesSchema,
   handler: async ({ pattern, path, caseSensitive }, sandbox) => {
     const abs = sandbox.resolve(path);
 
-    // Om mönstret inte ser ut som en glob (inga * ? [ ]), omvandla det till
-    // "*pattern*" så en enkel substring som "invite" fungerar intuitivt,
-    // precis som agenten i praktiken försökte göra manuellt.
+    // If the pattern doesn't look like a glob (no * ? [ ]), turn it into
+    // "*pattern*" so a plain substring like "invite" works intuitively,
+    // just like the agent in practice tried to do manually.
     const looksLikeGlob = /[*?\[\]]/.test(pattern);
     const glob = looksLikeGlob ? pattern : `*${pattern}*`;
 
@@ -358,12 +369,12 @@ export const findFilesTool: ToolDefinition<typeof findFilesSchema> = {
       .sort();
 
     if (files.length === 0) {
-      return `Inga filer matchade "${pattern}".`;
+      return `No files matched "${pattern}".`;
     }
     if (files.length > MAX_LIST_ENTRIES) {
       return [
         ...files.slice(0, MAX_LIST_ENTRIES),
-        `... (fler än ${MAX_LIST_ENTRIES} träffar, avkortat — förfina mönstret)`,
+        `... (more than ${MAX_LIST_ENTRIES} matches, truncated — refine the pattern)`,
       ].join("\n");
     }
     return files.join("\n");
@@ -371,27 +382,27 @@ export const findFilesTool: ToolDefinition<typeof findFilesSchema> = {
 };
 
 // ---------------------------------------------------------------------------
-// DET ENDA SKRIVVERKTYGET
+// THE ONLY WRITE TOOLS
 // ---------------------------------------------------------------------------
 
 const writeFileSchema = z.object({
-  path: z.string().describe("Sökväg till filen som ska skrivas, relativt sandbox-roten."),
-  content: z.string().describe("Fullständigt filinnehåll som ska skrivas (ersätter ev. befintligt innehåll)."),
+  path: z.string().describe("Path to the file to write, relative to the sandbox root."),
+  content: z.string().describe("The complete file content to write (replaces any existing content)."),
   createDirs: z
     .boolean()
     .default(true)
-    .describe("Skapa saknade mappar i sökvägen om de inte finns."),
+    .describe("Create missing directories in the path if they don't exist."),
 });
 
 export const writeFileTool: ToolDefinition<typeof writeFileSchema> = {
   name: "write_file",
   description:
-    "Skriv (skapa eller skriv över) en fil inom sandboxen med HELA filinnehållet på en gång. " +
-    "VARNING: detta ersätter filens fulla innehåll — om du bara vill ändra en del av en befintlig fil " +
-    "(t.ex. en funktion, en rad, lägga till en import) ska du använda edit_file istället, som gör en " +
-    "riktad ändring utan att du behöver känna till eller skicka med hela filens innehåll. " +
-    "Använd write_file för att SKAPA en ny fil, eller när du medvetet vill ersätta en fils fulla innehåll " +
-    "och du faktiskt har läst hela filen (full:true) först.",
+    "Write (create or overwrite) a file within the sandbox with the ENTIRE file content at once. " +
+    "WARNING: this replaces the full content of the file — if you only want to change part of an " +
+    "existing file (e.g. a function, a line, adding an import), use edit_file instead, which makes a " +
+    "targeted change without you needing to know or send the whole file's content. " +
+    "Use write_file to CREATE a new file, or when you deliberately want to replace a file's full content " +
+    "and you have actually read the whole file (full:true) first.",
   inputSchema: writeFileSchema,
   handler: async ({ path, content, createDirs }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -399,38 +410,38 @@ export const writeFileTool: ToolDefinition<typeof writeFileSchema> = {
       await mkdir(dirname(abs), { recursive: true });
     }
     await writeFile(abs, content, "utf-8");
-    return `Skrev ${Buffer.byteLength(content, "utf-8")} bytes till ${sandbox.toRelative(abs)}`;
+    return `Wrote ${Buffer.byteLength(content, "utf-8")} bytes to ${sandbox.toRelative(abs)}`;
   },
 };
 
 const editFileSchema = z.object({
-  path: z.string().describe("Sökväg till filen som ska ändras, relativt sandbox-roten. Filen måste redan finnas."),
+  path: z.string().describe("Path to the file to edit, relative to the sandbox root. The file must already exist."),
   oldString: z
     .string()
     .describe(
-      "Den exakta textsträngen som ska bytas ut (inkl. whitespace/indentering). Måste matcha EXAKT en gång " +
-        "i filen, annars avvisas ändringen (se replaceAll för flera förekomster)."
+      "The exact text string to replace (incl. whitespace/indentation). Must match EXACTLY once " +
+        "in the file, otherwise the edit is rejected (see replaceAll for multiple occurrences)."
     ),
-  newString: z.string().describe("Texten som ska ersätta oldString."),
+  newString: z.string().describe("The text to replace oldString with."),
   replaceAll: z
     .boolean()
     .default(false)
     .describe(
-      "Om true: ersätt ALLA förekomster av oldString istället för att kräva exakt en match. " +
-        "Använd med försiktighet — default false kräver exakt en match för att undvika oavsiktliga ändringar."
+      "If true: replace ALL occurrences of oldString instead of requiring exactly one match. " +
+        "Use with caution — default false requires exactly one match to avoid unintended changes."
     ),
 });
 
 export const editFileTool: ToolDefinition<typeof editFileSchema> = {
   name: "edit_file",
   description:
-    "Gör en RIKTAD ändring i en befintlig fil genom sök-och-ersätt (oldString → newString), utan att behöva " +
-    "känna till eller skicka med hela filens innehåll. Detta är det FÖREDRAGNA sättet att ändra en befintlig " +
-    "fil — använd detta istället för write_file när du bara ska lägga till/ändra/ta bort en avgränsad del " +
-    "(t.ex. lägga till en import, ändra en funktions body, lägga till en ny export). " +
-    "oldString måste matcha exakt en gång i filen (om inte replaceAll:true används) — detta är en säkerhetsspärr " +
-    "så att en ändring aldrig träffar fel ställe eller råkar skriva över något du inte sett. " +
-    "Om du är osäker på den exakta nuvarande texten: läs filen (eller relevant symbol/sektion) med read_file först.",
+    "Make a TARGETED change to an existing file via search-and-replace (oldString → newString), without needing " +
+    "to know or send the whole file's content. This is the PREFERRED way to change an existing " +
+    "file — use this instead of write_file when you're only adding/changing/removing a bounded part " +
+    "(e.g. adding an import, changing a function's body, adding a new export). " +
+    "oldString must match exactly once in the file (unless replaceAll:true is used) — this is a safety guard " +
+    "so an edit never hits the wrong place or accidentally overwrites something you haven't seen. " +
+    "If you're unsure of the exact current text: read the file (or the relevant symbol/section) with read_file first.",
   inputSchema: editFileSchema,
   handler: async ({ path, oldString, newString, replaceAll }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -439,36 +450,36 @@ export const editFileTool: ToolDefinition<typeof editFileSchema> = {
       st = await stat(abs);
     } catch {
       throw new Error(
-        `"${path}" finns inte. edit_file kan bara ändra befintliga filer — använd write_file för att skapa en ny fil.`
+        `"${path}" does not exist. edit_file can only change existing files — use write_file to create a new file.`
       );
     }
     if (st.isDirectory()) {
-      throw new Error(`"${path}" är en mapp, inte en fil.`);
+      throw new Error(`"${path}" is a directory, not a file.`);
     }
     if (st.size > MAX_READ_BYTES) {
-      throw new Error(`Filen är för stor (${st.size} bytes, max ${MAX_READ_BYTES}) för edit_file.`);
+      throw new Error(`File is too large (${st.size} bytes, max ${MAX_READ_BYTES}) for edit_file.`);
     }
 
     const content = await readFile(abs, "utf-8");
 
     if (oldString === newString) {
-      throw new Error("oldString och newString är identiska — ingen ändring att göra.");
+      throw new Error("oldString and newString are identical — nothing to change.");
     }
 
     const occurrences = content.split(oldString).length - 1;
 
     if (occurrences === 0) {
       throw new Error(
-        `Hittade ingen förekomst av den angivna oldString i ${path}. ` +
-          `Kontrollera att texten matchar exakt (inkl. whitespace/indentering) — läs filen/symbolen igen för att se exakt nuvarande innehåll.`
+        `No occurrence of the given oldString was found in ${path}. ` +
+          `Check that the text matches exactly (incl. whitespace/indentation) — read the file/symbol again to see the exact current content.`
       );
     }
 
     if (occurrences > 1 && !replaceAll) {
       throw new Error(
-        `oldString matchar ${occurrences} ställen i ${path}, inte exakt ett. ` +
-          `Gör oldString mer specifik (t.ex. inkludera mer omgivande kontext) så den bara matchar en gång, ` +
-          `eller skicka med replaceAll:true om du medvetet vill ersätta alla förekomster.`
+        `oldString matches ${occurrences} places in ${path}, not exactly one. ` +
+          `Make oldString more specific (e.g. include more surrounding context) so it only matches once, ` +
+          `or pass replaceAll:true if you deliberately want to replace all occurrences.`
       );
     }
 
@@ -478,8 +489,8 @@ export const editFileTool: ToolDefinition<typeof editFileSchema> = {
 
     await writeFile(abs, newContent, "utf-8");
 
-    const verb = occurrences > 1 ? `${occurrences} förekomster` : "1 förekomst";
-    return `Ersatte ${verb} i ${sandbox.toRelative(abs)} (${Buffer.byteLength(newContent, "utf-8")} bytes totalt efter ändring).`;
+    const verb = occurrences > 1 ? `${occurrences} occurrences` : "1 occurrence";
+    return `Replaced ${verb} in ${sandbox.toRelative(abs)} (${Buffer.byteLength(newContent, "utf-8")} bytes total after edit).`;
   },
 };
 

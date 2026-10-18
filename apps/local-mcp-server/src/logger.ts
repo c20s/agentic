@@ -3,12 +3,12 @@ import { dirname } from "node:path";
 import { homedir } from "node:os";
 
 /**
- * Enkel fil-logger så man kan köra `tail -f` på vad MCP-servern gör,
- * oavsett om den startades av Claude Code (bakgrundsprocess, ingen egen
- * terminal) eller manuellt av dig själv.
+ * Simple file logger so you can `tail -f` what the MCP server is doing,
+ * regardless of whether it was started by Claude Code (background process,
+ * no terminal of its own) or manually by you.
  *
- * Path kan overridas med env MCP_LOG_FILE. Sätt MCP_LOG_FILE="" (tom sträng)
- * för att stänga av filloggning helt (bara stderr kvar).
+ * Path can be overridden with the env var MCP_LOG_FILE. Set MCP_LOG_FILE=""
+ * (empty string) to disable file logging entirely (stderr only).
  */
 const DEFAULT_LOG_PATH = `${homedir()}/.claude/mcp-local-fs.log`;
 const LOG_PATH = process.env.MCP_LOG_FILE ?? DEFAULT_LOG_PATH;
@@ -17,18 +17,18 @@ if (LOG_PATH) {
   try {
     mkdirSync(dirname(LOG_PATH), { recursive: true });
   } catch {
-    // om det inte går att skapa mappen faller vi bara tillbaka på stderr nedan
+    // if the directory can't be created we just fall back to stderr below
   }
 }
 
 function write(line: string) {
-  // Alltid till stderr också (syns t.ex. om du kör servern manuellt i en terminal).
+  // Always also to stderr (visible e.g. if you run the server manually in a terminal).
   console.error(line);
   if (!LOG_PATH) return;
   try {
     appendFileSync(LOG_PATH, line + "\n");
   } catch {
-    // tyst fail - vi vill aldrig krascha servern pga loggning
+    // fail silently - we never want to crash the server due to logging
   }
 }
 
@@ -49,6 +49,6 @@ export const logger = {
   },
 
   toolError(name: string, durationMs: number, message: string) {
-    write(`[${new Date().toISOString()}] [fel]  ${name} (${durationMs}ms) -> ${message}`);
+    write(`[${new Date().toISOString()}] [err]  ${name} (${durationMs}ms) -> ${message}`);
   },
 };

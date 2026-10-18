@@ -2,28 +2,28 @@ import { resolve, isAbsolute, relative, sep } from "node:path";
 import { realpathSync, existsSync } from "node:fs";
 
 /**
- * Sandbox: Allt filsystemsarbete måste ske inom denna root.
- * Skyddar mot path traversal (../../etc/passwd osv) och symlinks
- * som pekar utanför root.
+ * Sandbox: all filesystem access must happen within this root.
+ * Protects against path traversal (../../etc/passwd etc.) and symlinks
+ * that point outside the root.
  */
 export class Sandbox {
   readonly root: string;
 
   constructor(root: string) {
     if (!isAbsolute(root)) {
-      throw new Error(`Sandbox root måste vara en absolut sökväg, fick: ${root}`);
+      throw new Error(`Sandbox root must be an absolute path, got: ${root}`);
     }
     if (!existsSync(root)) {
-      throw new Error(`Sandbox root finns inte: ${root}`);
+      throw new Error(`Sandbox root does not exist: ${root}`);
     }
-    // Normalisera (löser upp symlinks) så vi har en stabil bas att jämföra mot.
+    // Normalize (resolve symlinks) so we have a stable base to compare against.
     this.root = realpathSync(root);
   }
 
   /**
-   * Slår ihop en relativ (eller absolut) sökväg från klienten med sandbox-roten
-   * och verifierar att resultatet fortfarande ligger innanför roten.
-   * Kastar fel om sökvägen försöker ta sig ut (t.ex. "../../etc/passwd").
+   * Joins a relative (or absolute) path from the client with the sandbox root
+   * and verifies that the result still lies within the root.
+   * Throws if the path tries to escape (e.g. "../../etc/passwd").
    */
   resolve(userPath: string): string {
     const candidate = isAbsolute(userPath)
@@ -35,19 +35,19 @@ export class Sandbox {
 
     if (escapesRoot) {
       throw new Error(
-        `Otillåten sökväg: "${userPath}" hamnar utanför sandbox-roten (${this.root}).`
+        `Disallowed path: "${userPath}" resolves outside the sandbox root (${this.root}).`
       );
     }
 
-    // Om filen/mappen redan finns, lös upp ev. symlinks och verifiera igen,
-    // så man inte kan smyga ut via en symlink inuti sandboxen.
+    // If the file/directory already exists, resolve any symlinks and verify
+    // again, so you can't sneak out via a symlink inside the sandbox.
     if (existsSync(candidate)) {
       const real = realpathSync(candidate);
       const realRel = relative(this.root, real);
       const realEscapes = realRel === ".." || realRel.startsWith(`..${sep}`) || isAbsolute(realRel);
       if (realEscapes) {
         throw new Error(
-          `Otillåten sökväg: "${userPath}" är en symlink som pekar utanför sandbox-roten.`
+          `Disallowed path: "${userPath}" is a symlink pointing outside the sandbox root.`
         );
       }
       return real;
@@ -56,7 +56,7 @@ export class Sandbox {
     return candidate;
   }
 
-  /** Sökväg relativt sandbox-roten, för trevlig presentation i svar till agenten. */
+  /** Path relative to the sandbox root, for nicer presentation in responses to the agent. */
   toRelative(absPath: string): string {
     return relative(this.root, absPath) || ".";
   }

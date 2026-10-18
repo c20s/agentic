@@ -1,150 +1,151 @@
 # local-mcp-server
 
-En lokal [MCP](https://modelcontextprotocol.io)-server (TypeScript, körs med Bun) som
-ger en agent **enbart** en väg in till din dator: via det här verktyget.
+A local [MCP](https://modelcontextprotocol.io) server (TypeScript, runs with Bun) that
+gives an agent **only one** way into your computer: through this tool.
 
-Tanken: en session ska kunna startas med *endast* denna MCP registrerad, så att
-all context (läsning av filer, listning av mappar, sökning) och alla ändringar
-(skrivning av filer) går via samma, granskbara yta — inget annat filsystemsverktyg
-behövs eller exponeras.
+The idea: a session should be startable with *only* this MCP registered, so that
+all context (reading files, listing directories, searching) and all changes
+(writing files) go through the same, auditable surface — no other filesystem
+tool is needed or exposed.
 
-## Verktyg
+## Tools
 
 Read-only (context):
 
-- `list_dir` – lista filer/mappar
-- `read_file` – läs en fils innehåll (se "Outline-läge" nedan — default är en
-  förkortad outline, inte hela filen)
-- `file_stat` – metadata (storlek, typ, senast ändrad)
-- `search_files` – sök text/regex i filINNEHÅLL, implementerad med [ripgrep](https://github.com/BurntSushi/ripgrep)
-  (`rg` måste finnas på `PATH`, t.ex. `brew install ripgrep`). Stödjer:
-  - `query` – text (default) eller regex om `regex: true`
-  - `filePattern` – glob-filter, t.ex. `*.ts`
+- `list_dir` – list files/directories
+- `read_file` – read a file's content (see "Outline mode" below — the default
+  is a shortened outline, not the whole file)
+- `file_stat` – metadata (size, type, last modified)
+- `search_files` – search text/regex in file CONTENT, implemented with [ripgrep](https://github.com/BurntSushi/ripgrep)
+  (`rg` must be on `PATH`, e.g. `brew install ripgrep`). Supports:
+  - `query` – text (default) or regex if `regex: true`
+  - `filePattern` – glob filter, e.g. `*.ts`
   - `caseSensitive` – default `false`
-  - Hoppar automatiskt över `node_modules`, `.git`, `dist`, m.fl.
-- `find_files` – hitta filer baserat på FILNAMN/sökväg (inte innehåll), också
-  via ripgrep (`rg --files --glob`). Komplement till `search_files`
-  (innehåll) och `list_dir` (kräver att man redan är i rätt mapp):
-  - `pattern` – glob (`*.ts`, `src/**/*.test.ts`) eller en enkel substring
-    som `"invite"` (tolkas automatiskt som `*invite*`)
-  - `path` – mapp att söka inom, default sandbox-roten
+  - Automatically skips `node_modules`, `.git`, `dist`, etc.
+- `find_files` – find files based on FILE NAME/path (not content), also
+  via ripgrep (`rg --files --glob`). Complements `search_files`
+  (content) and `list_dir` (requires you to already be in the right directory):
+  - `pattern` – glob (`*.ts`, `src/**/*.test.ts`) or a plain substring
+    like `"invite"` (automatically interpreted as `*invite*`)
+  - `path` – directory to search within, default sandbox root
   - `caseSensitive` – default `false`
-  - Exempel: `find_files({ pattern: "invite-member-command" })` hittar filen
-    oavsett var i trädet den ligger, utan att du behöver gissa mappstruktur
-    eller gå via en innehålls-sökning.
+  - Example: `find_files({ pattern: "invite-member-command" })` finds the file
+    regardless of where in the tree it lives, without you needing to guess
+    the directory structure or go via a content search.
 
-### Outline-läge för `read_file`
+### Outline mode for `read_file`
 
-Per default returnerar `read_file` **inte** hela filinnehållet för vissa
-filtyper — istället en kompakt outline, för att spara context:
+By default `read_file` does **not** return the entire file content for certain
+file types — instead a compact outline, to save context:
 
-| Filtyp | Default-output |
+| File type | Default output |
 |---|---|
-| `.md` / `.mdx` | Alla rubriker/underrubriker med radnummer och indrag efter nivå |
-| `.ts` / `.tsx` / `.js` / `.jsx` | Alla top-level `import`/`const`/`function`/`interface`/`type`/`class`/`enum`, med signatur men **utan body** (riktig TS-AST-parsning, inte regex) |
-| `.json` / `.jsonc` | Alla nyckel-paths rekursivt, t.ex. `foo`, `foo.bar`, `foo.bar.baz`, `items[0].name` |
-| `.yaml` / `.yml` | Samma som JSON ovan — alla nyckel-paths rekursivt (parsas med `Bun.YAML`, inbyggt i Bun) |
-| Övriga filtyper | Hela filen, som vanligt |
+| `.md` / `.mdx` | All headings/subheadings with line numbers and indentation by level |
+| `.ts` / `.tsx` / `.js` / `.jsx` | All top-level `import`/`const`/`function`/`interface`/`type`/`class`/`enum`, with signature but **no body** (real TS AST parsing, not regex) |
+| `.json` / `.jsonc` | All key paths recursively, e.g. `foo`, `foo.bar`, `foo.bar.baz`, `items[0].name` |
+| `.yaml` / `.yml` | Same as JSON above — all key paths recursively (parsed with `Bun.YAML`, built into Bun) |
+| Other file types | The whole file, as usual |
 
-**Täckningsgaranti för TS/JS-outline:** om en fil innehåller top-level-kod som
-inte är en känd deklarationstyp (t.ex. ett löst `console.log(...)`, en IIFE,
-eller annan "lös" kod direkt i filen), markeras den som `other` i outline
-**och** en explicit varning läggs till i svaret: outline är då INTE en
-fullständig representation av filen. Filer utan sådan lös kod får ingen
-varning — outline-listan (inkl. imports) täcker då verkligen allt på
-top-level i filen.
+**Coverage guarantee for TS/JS outline:** if a file contains top-level code
+that isn't a known declaration type (e.g. a loose `console.log(...)`, an IIFE,
+or other "stray" code directly in the file), it's marked as `other` in the
+outline **and** an explicit warning is added to the response: the outline is
+then NOT a complete representation of the file. Files without such stray code
+get no warning — the outline list (incl. imports) then really does cover
+everything at the top level of the file.
 
-Två sätt att få mer:
+Two ways to get more:
 
-- **`symbol: "<namn/path/rubrik>"`** – hämta bara en specifik del:
-  - `.md`: matchar rubriktext (substring, case-insensitive) → hela den
-    sektionen (till nästa rubrik på samma eller högre nivå)
-  - `.ts`/`.js` m.fl.: matchar ett symbolnamn → hela källkoden **inklusive
-    body**
-  - `.json`/`.yaml`/`.yml`: en nyckel-path (t.ex. `"foo.bar.baz"` eller
-    `"items[0].name"`) → värdet på den pathen
-- **`full: true`** – hoppa över outline-logiken helt, hämta hela filen rakt av
-  (oavsett filtyp).
+- **`symbol: "<name/path/heading>"`** – fetch just a specific part:
+  - `.md`: matches heading text (substring, case-insensitive) → the entire
+    section (up to the next heading at the same or higher level)
+  - `.ts`/`.js` etc.: matches a symbol name → the full source code
+    **including body**
+  - `.json`/`.yaml`/`.yml`: a key path (e.g. `"foo.bar.baz"` or
+    `"items[0].name"`) → the value at that path
+- **`full: true`** – skip the outline logic entirely, fetch the whole file
+  as-is (regardless of file type).
 
-Exempel-flöde för en agent: läs `src/tools.ts` utan argument → ser en lista
-med alla top-level-symboler → läser sen `read_file({ path: "src/tools.ts",
-symbol: "writeFileTool" })` för att få just den funktionens/konstantens
-fullständiga källkod.
+Example flow for an agent: read `src/tools.ts` without arguments → sees a list
+of all top-level symbols → then reads `read_file({ path: "src/tools.ts",
+symbol: "writeFileTool" })` to get that specific function's/constant's
+full source code.
 
-Write (de enda vägarna att ändra något):
+Write (the only ways to change anything):
 
-- `edit_file` – **föredraget** sätt att ändra en befintlig fil: riktad
-  sök-och-ersätt (`oldString` → `newString`) utan att behöva känna till eller
-  skicka med hela filens innehåll. `oldString` måste matcha exakt en gång
-  (säkerhetsspärr mot tvetydiga ändringar), om inte `replaceAll: true` anges.
-- `write_file` – skriv/skapa en fil med **fullständigt** nytt innehåll (hela
-  filen skrivs över). Använd för att skapa nya filer, eller när du medvetet
-  vill ersätta en hel fil och faktiskt har läst den i sin helhet (`full:
-  true`) först.
+- `edit_file` – **preferred** way to change an existing file: targeted
+  search-and-replace (`oldString` → `newString`) without needing to know or
+  send the whole file's content. `oldString` must match exactly once
+  (a safety guard against ambiguous edits), unless `replaceAll: true` is given.
+- `write_file` – write/create a file with **complete** new content (the
+  entire file is overwritten). Use this to create new files, or when you
+  deliberately want to replace an entire file and have actually read it in
+  full (`full: true`) first.
 
-Det finns **inget** verktyg för att ta bort filer, köra skal-kommandon, flytta
-filer, osv. Om du vill utöka servern med fler skrivoperationer, lägg till dem
-explicit i `src/tools.ts` och tänk igenom konsekvenserna — håll gärna skriv-ytan
-så smal som möjligt.
+There is **no** tool for deleting files, running shell commands, moving
+files, etc. If you want to extend the server with more write operations, add
+them explicitly in `src/tools.ts` and think through the consequences — keep
+the write surface as narrow as possible.
 
-### Varför både `edit_file` och `write_file`?
+### Why both `edit_file` and `write_file`?
 
-Outline-läget (ovan) är utmärkt för att **läsa/förstå** kod effektivt, men det
-är en partiell vy av filen. Eftersom `write_file` skriver över HELA filen,
-skulle en skrivning baserad enbart på en partiell läsning riskera att tappa
-bort kod agenten aldrig såg (imports den inteläste, kommentarer, lös kod,
-exakt formatering, etc.).
+Outline mode (above) is excellent for **reading/understanding** code
+efficiently, but it's a partial view of the file. Since `write_file`
+overwrites the ENTIRE file, a write based solely on a partial read would risk
+losing code the agent never saw (imports it didn't read, comments, stray
+code, exact formatting, etc.).
 
-`edit_file` löser detta: det kräver bara den exakta biten som ska ändras
-(`oldString`/`newString`), aldrig hela filen. Det gör att agenten kan göra
-helt riktade ändringar — lägga till en import, ändra en funktions body, lägga
-till en ny export — utan att någonsin behöva läsa eller skriva om resten av
-filen den inte brydde sig om.
+`edit_file` solves this: it only requires the exact piece being changed
+(`oldString`/`newString`), never the whole file. This lets the agent make
+fully targeted changes — adding an import, changing a function's body,
+adding a new export — without ever needing to read or rewrite the rest of
+the file it didn't care about.
 
-Rekommenderat flöde för agenten:
-1. `read_file` (outline eller `symbol`) för att hitta och förstå rätt ställe
-2. `edit_file` för att göra den riktade ändringen
-3. `write_file` bara när en helt ny fil ska skapas, eller när hela filen
-   medvetet ska ersättas (efter `full: true`-läsning)
+Recommended flow for the agent:
+1. `read_file` (outline or `symbol`) to find and understand the right spot
+2. `edit_file` to make the targeted change
+3. `write_file` only when creating a brand new file, or when the whole file
+   is deliberately being replaced (after a `full: true` read)
 
 ## Sandbox
 
-Allt är begränsat till en **root-katalog**. Sökvägar som försöker ta sig ut
-(`../../etc/passwd`, symlinks som pekar utanför roten, etc.) avvisas med fel.
-Se `src/sandbox.ts`.
+Everything is confined to a **root directory**. Paths that try to escape
+(`../../etc/passwd`, symlinks pointing outside the root, etc.) are rejected
+with an error. See `src/sandbox.ts`.
 
-Root bestäms i prioritetsordning:
+The root is determined in priority order:
 
-1. Första CLI-argumentet: `bun run src/index.ts /path/till/projekt`
-2. Env-variabeln `MCP_SANDBOX_ROOT`
-3. Annars: den katalog servern startas ifrån (`cwd`)
+1. First CLI argument: `bun run src/index.ts /path/to/project`
+2. The `MCP_SANDBOX_ROOT` env var
+3. Otherwise: the directory the server was started from (`cwd`)
 
-## Köra lokalt
+## Running locally
 
 ```bash
 bun install
-bun run start /path/till/mitt/projekt
+bun run start /path/to/my/project
 ```
 
-Servern pratar MCP över stdio (standard för lokala MCP-servrar) och loggar
-status till stderr, så den stör inte JSON-RPC-trafiken på stdout.
+The server speaks MCP over stdio (standard for local MCP servers) and logs
+status to stderr, so it doesn't interfere with the JSON-RPC traffic on
+stdout.
 
-## Monitorera vad agenten faktiskt gör
+## Monitoring what the agent is actually doing
 
-När Claude Code (t.ex. via `ai`-aliaset) startar en session spawnar den
-MCP-servern själv som en bakgrundsprocess — den syns inte i en egen terminal,
-och du kan **inte** ansluta en egen klient till en redan körande instans
-(stdio-transport är en 1-till-1-koppling mellan den process som startade
-servern och servern själv).
+When Claude Code (e.g. via the `ai` alias) starts a session, it spawns the
+MCP server itself as a background process — it doesn't show up in its own
+terminal, and you **can't** connect a separate client to an already-running
+instance (stdio transport is a 1-to-1 connection between the process that
+started the server and the server itself).
 
-Istället loggar servern varje verktygsanrop (namn, argument, resultat/fel,
-tidsåtgång) till en loggfil. Kör i ett separat terminalfönster:
+Instead, the server logs every tool call (name, arguments, result/error,
+duration) to a log file. Run in a separate terminal window:
 
 ```bash
 tail -f ~/.claude/mcp-local-fs.log
 ```
 
-så ser du i realtid vad agenten gör — t.ex:
+and you'll see in real time what the agent is doing — e.g.:
 
 ```
 [2026-10-18T15:59:35.995Z] [call] list_dir {"path":".","recursive":false}
@@ -156,25 +157,26 @@ så ser du i realtid vad agenten gör — t.ex:
 ...
 ```
 
-Loggfilens path kan ändras med env-variabeln `MCP_LOG_FILE`. Sätt den till en
-tom sträng (`MCP_LOG_FILE=""`) för att stänga av filloggning helt (du får då
-bara stderr-loggning, vilket bara syns om du kör servern manuellt i en
-terminal).
+The log file path can be changed with the `MCP_LOG_FILE` env var. Set it to
+an empty string (`MCP_LOG_FILE=""`) to disable file logging entirely (you'll
+then only get stderr logging, which is only visible if you run the server
+manually in a terminal).
 
-Om du vill köra servern helt fristående (t.ex. för att testa den isolerat
-eller peka en MCP-inspector mot den) går det förstås också:
+If you want to run the server completely standalone (e.g. to test it in
+isolation or point an MCP inspector at it), that works too of course:
 
 ```bash
-bun run start /path/till/mappen
+bun run start /path/to/the/directory
 ```
 
-men kom ihåg: då kan inte Claude Code ansluta till *den* instansen samtidigt
-— Claude Code startar alltid sin egen process enligt `--mcp-config`.
+but remember: then Claude Code can't connect to *that* instance at the same
+time — Claude Code always starts its own process according to
+`--mcp-config`.
 
-## Koppla in i Claude Code / Claude Desktop
+## Connecting to Claude Code / Claude Desktop
 
-Lägg till i din MCP-konfiguration (t.ex. `~/.claude.json` eller motsvarande
-`mcpServers`-sektion):
+Add to your MCP configuration (e.g. `~/.claude.json` or the equivalent
+`mcpServers` section):
 
 ```json
 {
@@ -184,31 +186,31 @@ Lägg till i din MCP-konfiguration (t.ex. `~/.claude.json` eller motsvarande
       "args": [
         "run",
         "/Users/erihan/dev/c20s/agentic/apps/local-mcp-server/src/index.ts",
-        "/Users/erihan/dev/mitt-projekt"
+        "/Users/erihan/dev/my-project"
       ]
     }
   }
 }
 ```
 
-Byt sista argumentet mot den mapp du vill att agenten ska få tillgång till i
-just den sessionen. Starta en ny session per projekt/root om du vill hålla
-sandboxarna strikt åtskilda.
+Replace the last argument with the directory you want the agent to have
+access to in that particular session. Start a new session per project/root
+if you want to keep the sandboxes strictly separate.
 
-Om du startar en session med **enbart** denna MCP aktiverad (dvs. inga andra
-verktyg för filsystem/skal tillåtna i den klienten) så är detta den enda vägen
-in/ut för agenten till din disk, precis som tänkt.
+If you start a session with **only** this MCP enabled (i.e. no other
+filesystem/shell tools allowed in that client), this is the agent's only way
+in/out to your disk, exactly as intended.
 
-### Strikt, låst session via `claude`-CLI:n
+### Strict, locked-down session via the `claude` CLI
 
-För att verkligen tvinga fram "bara denna MCP, inget annat" räcker det **inte**
-med `--bare` + `--strict-mcp-config` ensamt — de styr bara vilka *MCP-servrar*
-som laddas. Claude Code har fortfarande sina inbyggda verktyg (`Bash`, `Edit`,
-`Read`, `Write`, `Glob`, `Grep`, m.fl.) kvar som standard. De måste blockeras
-explicit med `--disallowedTools`.
+To truly enforce "only this MCP, nothing else" it's **not enough** to use
+`--bare` + `--strict-mcp-config` alone — they only control which *MCP
+servers* are loaded. Claude Code still has its built-in tools (`Bash`,
+`Edit`, `Read`, `Write`, `Glob`, `Grep`, etc.) by default. They must be
+blocked explicitly with `--disallowedTools`.
 
-1. Skapa **en enda, global** MCP-configfil, t.ex. `~/.claude/mcp-local-fs.json`
-   — **utan** `cwd`-fält:
+1. Create **one single, global** MCP config file, e.g. `~/.claude/mcp-local-fs.json`
+   — **without** a `cwd` field:
 
    ```json
    {
@@ -224,22 +226,23 @@ explicit med `--disallowedTools`.
    }
    ```
 
-   (Mallen finns även som `mcp.config.example.json` i detta repo.)
+   (The template is also available as `mcp.config.example.json` in this repo.)
 
-   Ingen `cwd` behövs eftersom servern faller tillbaka på `process.cwd()` —
-   och Claude Code startar MCP-servern med samma arbetskatalog som `claude`
-   själv kördes ifrån. Det betyder att **samma globala config funkar för alla
-   projekt**: sandbox-roten blir automatiskt vilken mapp du än står i när du
-   kör kommandot (verifierat: körning från mapp A resp. mapp B med identisk
-   config gav isolerad åtkomst till respektive mapp, och `../`-försök att
-   läsa ut ur sandboxen blockerades).
+   No `cwd` is needed since the server falls back to `process.cwd()` — and
+   Claude Code starts the MCP server with the same working directory that
+   `claude` itself was run from. That means **the same global config works
+   for every project**: the sandbox root automatically becomes whichever
+   directory you're in when you run the command (verified: running from
+   directory A vs. directory B with the identical config gave isolated
+   access to each respective directory, and `../` attempts to read out of
+   the sandbox were blocked).
 
-   Prioritetsordningen för sandbox-root i servern är fortfarande: CLI-arg →
-   `MCP_SANDBOX_ROOT` env → `cwd` den startades med — så du kan fortfarande
-   override:a per projekt om du nån gång skulle vilja det, men det behövs
-   inte för normalfallet.
+   The priority order for the sandbox root in the server is still: CLI arg →
+   `MCP_SANDBOX_ROOT` env → the `cwd` it was started with — so you can still
+   override it per project if you ever want to, but it's not needed for the
+   normal case.
 
-2. Kör med följande kombination (verifierad att fungera):
+2. Run with the following combination (verified to work):
 
    ```bash
    claude --bare \
@@ -251,61 +254,62 @@ explicit med `--disallowedTools`.
      --disallowedTools "Bash,Edit,Read,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit"
    ```
 
-   Vad varje flagga gör här:
+   What each flag does here:
 
-   - `--bare` – minimalt läge, hoppar bl.a. över auto-discovery av
-     `.mcp.json`/CLAUDE.md (men respekterar `--mcp-config`/`--settings`
-     eftersom de anges explicit).
-   - `--settings ~/.claude/settings.json` – dina vanliga inställningar
-     (auth via `apiKeyHelper`, permissions, etc.) eftersom `--bare` aldrig
-     läser OAuth/keychain.
-   - `--setting-sources project` – läs bara projektets `settings.json`
-     utöver `--settings`-filen, inte user/local.
-   - `--mcp-config ~/.claude/mcp-local-fs.json` – **måste** anges explicit;
-     utan den tillåter `--strict-mcp-config` noll MCP-servrar alls.
-   - `--strict-mcp-config` – ignorera alla andra MCP-källor, använd bara
-     det som står i `--mcp-config`.
-   - `--disable-slash-commands` – inga slash-kommandon.
-   - `--disallowedTools "Bash,Edit,Read,Write,..."` – **det här är kritiskt**:
-     blockerar Claude Codes inbyggda filsystems-/skalverktyg så att
-     `mcp__local-fs__*` blir den enda återstående vägen till disk.
+   - `--bare` – minimal mode, skips e.g. auto-discovery of
+     `.mcp.json`/CLAUDE.md (but respects `--mcp-config`/`--settings` since
+     they're given explicitly).
+   - `--settings ~/.claude/settings.json` – your usual settings
+     (auth via `apiKeyHelper`, permissions, etc.) since `--bare` never
+     reads OAuth/keychain.
+   - `--setting-sources project` – only read the project's `settings.json`
+     in addition to the `--settings` file, not user/local.
+   - `--mcp-config ~/.claude/mcp-local-fs.json` – **must** be given
+     explicitly; without it `--strict-mcp-config` allows zero MCP servers
+     at all.
+   - `--strict-mcp-config` – ignore all other MCP sources, only use
+     what's in `--mcp-config`.
+   - `--disable-slash-commands` – no slash commands.
+   - `--disallowedTools "Bash,Edit,Read,Write,..."` – **this is critical**:
+     blocks Claude Code's built-in filesystem/shell tools so that
+     `mcp__local-fs__*` becomes the only remaining path to disk.
 
-   Praktiskt: lägg hela kommandot i ett shell-alias, t.ex. i `~/.zshrc`:
+   In practice: put the whole command in a shell alias, e.g. in `~/.zshrc`:
 
    ```bash
    alias ai='claude --bare --settings ~/.claude/settings.json --setting-sources project --mcp-config ~/.claude/mcp-local-fs.json --strict-mcp-config --disable-slash-commands --disallowedTools "Bash,Edit,Read,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit"'
    ```
 
-   Kör sen bara `ai` från vilket projekts rot-mapp du vill ge agenten
-   tillgång till — ingen projekt-specifik konfiguration behövs.
+   Then just run `ai` from whichever project root directory you want to
+   give the agent access to — no project-specific configuration needed.
 
-3. Verifiera i en session att det blev rätt:
+3. Verify in a session that it worked correctly:
 
    ```bash
-   ai -p "Vilka verktyg har du tillgång till? Lista dem alla."
+   ai -p "What tools do you have access to? List them all."
    ```
 
-   Förväntat svar: enbart `mcp__local-fs__list_dir`, `read_file`, `file_stat`,
-   `search_files`, `find_files`, `edit_file` och `write_file`.
+   Expected answer: only `mcp__local-fs__list_dir`, `read_file`, `file_stat`,
+   `search_files`, `find_files`, `edit_file` and `write_file`.
 
-   **Viktigt att komma ihåg:** en vanlig, oinskränkt `claude`-session (utan
-   `--bare`/`--disallowedTools`) har fortfarande fulla `Bash`/`Edit`/`Read`/
-   `Write`-verktyg precis som vanligt — det är bara `ai`-aliaset (eller
-   motsvarande explicita flaggor) som ger den låsta, MCP-only-upplevelsen.
-   Om du ser t.ex. `git ls-files` köras via `Bash` i en session, betyder det
-   att den sessionen startades utan dessa flaggor, inte att låsningen läckte.
+   **Important to remember:** a normal, unrestricted `claude` session
+   (without `--bare`/`--disallowedTools`) still has full `Bash`/`Edit`/`Read`/
+   `Write` tools as usual — it's only the `ai` alias (or the equivalent
+   explicit flags) that gives the locked-down, MCP-only experience. If you
+   see e.g. `git ls-files` run via `Bash` in a session, that means that
+   session was started without these flags, not that the lockdown leaked.
 
-## Begränsningar / medvetna val
+## Limitations / deliberate choices
 
-- Max filstorlek för `read_file`: 1 MB (skydd mot att råka svälja
-  jättefiler/binärer in i context).
-- `list_dir`/`search_files` ignorerar brus som `node_modules`, `.git`, `dist`
-  m.fl.
-- `write_file` skriver över hela filen (ingen patch/diff-logik) — enklast att
-  resonera om och granska.
-- Inga destruktiva verktyg (delete, move, exec) finns med avsikt.
-- `search_files` kräver `ripgrep` (`rg`) installerat på systemet och i
-  `PATH`. Servern kör `rg` som subprocess (`Bun.spawn`) med `--json` för
-  robust parsning av resultat. Sökvägen (`path`-argumentet) valideras och
-  låses till sandboxen *innan* `rg` anropas, så traversal-försök via det
-  argumentet stoppas av vårt eget sandbox-lager, inte av ripgrep.
+- Max file size for `read_file`: 1 MB (guard against accidentally
+  swallowing huge files/binaries into context).
+- `list_dir`/`search_files` ignore noise like `node_modules`, `.git`, `dist`,
+  etc.
+- `write_file` overwrites the entire file (no patch/diff logic) — simplest
+  to reason about and review; use `edit_file` for targeted changes instead.
+- No destructive tools (delete, move, exec) exist by design.
+- `search_files` requires `ripgrep` (`rg`) installed on the system and on
+  `PATH`. The server runs `rg` as a subprocess (`Bun.spawn`) with `--json`
+  for robust result parsing. The path (`path` argument) is validated and
+  locked to the sandbox *before* `rg` is invoked, so traversal attempts via
+  that argument are stopped by our own sandbox layer, not by ripgrep.

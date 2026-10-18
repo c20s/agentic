@@ -7,8 +7,8 @@ import { allTools } from "./tools";
 import { logger } from "./logger";
 
 /**
- * Sandbox-root: var agenten får läsa/skriva.
- * Prioritet: första CLI-argumentet > MCP_SANDBOX_ROOT env var > cwd.
+ * Sandbox root: where the agent is allowed to read/write.
+ * Priority: first CLI argument > MCP_SANDBOX_ROOT env var > cwd.
  */
 const rootArg = process.argv[2] ?? process.env.MCP_SANDBOX_ROOT ?? process.cwd();
 const sandbox = new Sandbox(resolve(rootArg));
@@ -38,7 +38,7 @@ for (const tool of allTools) {
         const message = err instanceof Error ? err.message : String(err);
         logger.toolError(tool.name, Math.round(performance.now() - start), message);
         return {
-          content: [{ type: "text" as const, text: `Fel: ${message}` }],
+          content: [{ type: "text" as const, text: `Error: ${message}` }],
           isError: true,
         };
       }
@@ -49,13 +49,13 @@ for (const tool of allTools) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  logger.info(`Startad. Sandbox root: ${sandbox.root}. PID: ${process.pid}.`);
+  logger.info(`Started. Sandbox root: ${sandbox.root}. PID: ${process.pid}.`);
   if (logger.path) {
-    logger.info(`Loggar till: ${logger.path} (tail -f för att följa live).`);
+    logger.info(`Logging to: ${logger.path} (tail -f to follow live).`);
   }
 }
 
 main().catch((err) => {
-  logger.info(`Misslyckades att starta: ${err instanceof Error ? err.message : String(err)}`);
+  logger.info(`Failed to start: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });
