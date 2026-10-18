@@ -1,0 +1,14 @@
+{
+  "name": "agentic",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "logs:tail": "tail -f ~/.claude/mcp-local-fs.summary.log",
+    "logs:tail:detail": "tail -f ~/.claude/mcp-local-fs.log",
+    "logs:tail:all": "tail -f ~/.claude/mcp-local-fs.summary.log ~/.claude/mcp-local-fs.log",
+    "logs:tail:session": "./scripts/tail-session-logs.sh",
+    "logs:clear": "truncate -s 0 ~/.claude/mcp-local-fs.summary.log ~/.claude/mcp-local-fs.log 2>/dev/null; echo 'Logs cleared.'",
+    "logs:clear:detail": "truncate -s 0 ~/.claude/mcp-local-fs.log 2>/dev/null; echo 'Detail log cleared.'",
+    "logs:clear:summary": "truncate -s 0 ~/.claude/mcp-local-fs.summary.log 2>/dev/null; echo 'Summary log cleared.'"
+  }
+}

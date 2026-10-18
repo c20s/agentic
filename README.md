@@ -138,6 +138,30 @@ Parameterized templates, filled via `apm run --param key=value`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the authoring workflow.
 
+## local-mcp-server logs
+
+[`apps/local-mcp-server`](apps/local-mcp-server) is a local MCP server used to
+give an agent a single, sandboxed, auditable filesystem interface. It logs
+every tool call to `~/.claude/mcp-local-fs.log` (detail) and
+`~/.claude/mcp-local-fs.summary.log` (one compact line per call). Root-level
+`package.json` scripts help with those logs regardless of which project
+you're currently working in:
+
+| Command | Effect |
+|---|---|
+| `bun run logs:tail` | Follow the summary log (session, tool, bytes, duration) |
+| `bun run logs:tail:detail` | Follow the detail log (full arguments + result preview) |
+| `bun run logs:tail:all` | Follow both logs at once |
+| `bun run logs:tail:session -- <sessionId> [detail]` | Follow only one session (grep-filtered); add `detail` for the detail log |
+| `bun run logs:clear` | Truncate both log files |
+| `bun run logs:clear:summary` | Truncate only the summary log |
+| `bun run logs:clear:detail` | Truncate only the detail log |
+
+The session id is printed by the MCP server at startup and on every log
+line, e.g. `[1efcb748]`. See
+[`apps/local-mcp-server/README.md`](apps/local-mcp-server/README.md) for
+full details on the server itself.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

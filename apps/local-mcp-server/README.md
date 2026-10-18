@@ -138,29 +138,57 @@ terminal, and you **can't** connect a separate client to an already-running
 instance (stdio transport is a 1-to-1 connection between the process that
 started the server and the server itself).
 
-Instead, the server logs every tool call (name, arguments, result/error,
-duration) to a log file. Run in a separate terminal window:
+Instead, the server logs every tool call to **two** colorized, append-only
+log files:
+
+- **Summary log** (`~/.claude/mcp-local-fs.summary.log`) – one compact line
+  per call: session id, tool name, result size in bytes, duration, ok/error.
+  Good for a quick, high-level overview of activity.
+- **Detail log** (`~/.claude/mcp-local-fs.log`) – same as the summary, plus
+  the full arguments and a preview of the result/error for every call. Good
+  for debugging exactly what an agent read, searched for, or wrote.
+
+Since the server runs over stdio, each Claude Code session spawns its own
+server process — so "session" here means one server process instance,
+identified by a short id (first 8 chars of a random UUID) generated at
+startup and printed in every log line, e.g. `[1efcb748]`. Each session also
+gets a stable color so interleaved sessions in the same log file are easy to
+tell apart visually, not just by grepping.
+
+Run in a separate terminal window to follow everything live:
 
 ```bash
-tail -f ~/.claude/mcp-local-fs.log
+tail -f ~/.claude/mcp-local-fs.summary.log
 ```
 
-and you'll see in real time what the agent is doing — e.g.:
-
 ```
-[2026-10-18T15:59:35.995Z] [call] list_dir {"path":".","recursive":false}
-[2026-10-18T15:59:35.998Z] [ok]   list_dir (2ms) -> .apm/
-.gitignore
-...
-[2026-10-18T15:59:36.010Z] [call] read_file {"path":"README.md"}
-[2026-10-18T15:59:36.011Z] [ok]   read_file (1ms) -> # agentic
-...
+2026-10-18T19:49:53.389Z [1efcb748] [info] Started. Sandbox root: /Users/erihan/dev/c20s/golden-project. PID: 23405. Session: 1efcb748.
+2026-10-18T19:49:53.390Z [1efcb748] [info] To follow just this session: tail -f ~/.claude/mcp-local-fs.summary.log | grep 1efcb748
+2026-10-18T19:49:55.617Z [1efcb748] ok    find_files         134B    21ms
+2026-10-18T19:49:57.816Z [1efcb748] ok    read_file          591B    19ms
+2026-10-18T19:49:57.827Z [1efcb748] ok    read_file          829B     3ms
 ```
 
-The log file path can be changed with the `MCP_LOG_FILE` env var. Set it to
-an empty string (`MCP_LOG_FILE=""`) to disable file logging entirely (you'll
-then only get stderr logging, which is only visible if you run the server
-manually in a terminal).
+To follow **only one session** (e.g. when several `ai` sessions are running
+at once and sharing the same log file), grep on the session id printed at
+startup:
+
+```bash
+tail -f ~/.claude/mcp-local-fs.summary.log | grep 1efcb748
+```
+
+The same works for the detail log if you need full arguments/results for
+just that session:
+
+```bash
+tail -f ~/.claude/mcp-local-fs.log | grep 1efcb748
+```
+
+Log file paths can be changed with the `MCP_LOG_FILE` (detail) and
+`MCP_SUMMARY_LOG_FILE` (summary) env vars. Set either to an empty string
+(e.g. `MCP_LOG_FILE=""`) to disable that file entirely — stderr still gets
+both levels, which is only visible if you run the server manually in a
+terminal.
 
 If you want to run the server completely standalone (e.g. to test it in
 isolation or point an MCP inspector at it), that works too of course:

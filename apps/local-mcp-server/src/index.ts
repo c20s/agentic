@@ -49,9 +49,17 @@ for (const tool of allTools) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  logger.info(`Started. Sandbox root: ${sandbox.root}. PID: ${process.pid}.`);
+  logger.info(`Started. Sandbox root: ${sandbox.root}. PID: ${process.pid}. Session: ${logger.sessionId}.`);
+  if (logger.summaryPath) {
+    logger.info(`Summary log: ${logger.summaryPath}`);
+  }
   if (logger.path) {
-    logger.info(`Logging to: ${logger.path} (tail -f to follow live).`);
+    logger.info(`Detail log: ${logger.path}`);
+  }
+  if (logger.summaryPath || logger.path) {
+    logger.info(
+      `To follow just this session: tail -f ${logger.summaryPath ?? logger.path} | grep ${logger.sessionId}`
+    );
   }
 }
 
