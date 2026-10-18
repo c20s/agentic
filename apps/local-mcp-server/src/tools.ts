@@ -77,13 +77,30 @@ export const listDirTool: ToolDefinition<typeof listDirSchema> = {
   },
 };
 
+// Under denna gräns spelar outline mindre roll (filen är redan liten),
+// så vi tillåter full:true fritt. Över gränsen krävs en uttrycklig "reason"
+// för att undvika att agenten slentrianmässigt alltid kör full:true och
+// därmed gör hela outline-funktionen meningslös.
+const FULL_READ_FREE_THRESHOLD_BYTES = 4_000;
+
 const readFileSchema = z.object({
   path: z.string().describe("Sökväg till filen, relativt sandbox-roten."),
   full: z
     .boolean()
     .default(false)
     .describe(
-      "Hämta hela filinnehållet rakt av, utan outline-förkortning. Default false: för .md/.ts/.json ges en kompakt outline istället (se beskrivning av verktyget)."
+      "Hämta hela filinnehållet rakt av, utan outline-förkortning. " +
+        "ANVÄND SPARSAMT: läs först utan 'full' (du får en outline), och hämta sen specifika " +
+        "delar med 'symbol'. För filer större än ~4KB av outline-bar typ (.md/.ts/.json) " +
+        "krävs dessutom 'reason' tillsammans med full:true."
+    ),
+  reason: z
+    .string()
+    .optional()
+    .describe(
+      "Krävs bara om full:true används på en fil >4KB av outline-bar typ: en kort motivering " +
+        "till varför du behöver hela filinnehållet istället för outline/symbol (t.ex. " +
+        "'behöver se hela filens kontext för en stor refaktor')."
     ),
   symbol: z
     .string()
@@ -107,7 +124,7 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
     "Övriga filtyper returneras i sin helhet som vanligt. " +
     "Ange 'symbol' för att hämta en specifik del (rubriksektion/funktion/nyckelvärde), eller 'full: true' för hela filen.",
   inputSchema: readFileSchema,
-  handler: async ({ path, full, symbol }, sandbox) => {
+  handler: async ({ path, full, reason, symbol }, sandbox) => {
     const abs = sandbox.resolve(path);
     const st = await stat(abs);
     if (st.isDirectory()) {
@@ -119,12 +136,21 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
       );
     }
     const content = await readFile(abs, "utf-8");
+    const kind = outlineKindForFile(abs);
 
     if (full) {
+      const isOutlineable = kind !== null;
+      const isLarge = st.size > FULL_READ_FREE_THRESHOLD_BYTES;
+      if (isOutlineable && isLarge && !reason?.trim()) {
+        throw new Error(
+          `"${path}" är ${st.size} bytes och stödjer outline-läge. ` +
+            `Läs först utan 'full' för att se strukturen, och hämta sen specifika delar med 'symbol'. ` +
+            `Om du verkligen behöver hela filen: skicka med 'reason' som förklarar varför ` +
+            `(t.ex. "behöver se hela filen för en stor refaktor").`
+        );
+      }
       return content;
     }
-
-    const kind = outlineKindForFile(abs);
 
     if (symbol) {
       if (kind === "markdown") {
@@ -229,7 +255,10 @@ async function runRipgrep(args: string[], cwd: string): Promise<{ stdout: string
 export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
   name: "search_files",
   description:
-    "Sök efter text eller regex i filer inom sandboxen, med ripgrep. Read-only. Bra för att hitta var något definieras eller används.",
+    "Sök efter text eller regex i filINNEHÅLL inom sandboxen, med ripgrep. Read-only. " +
+    "Bra för att hitta var något definieras eller används. " +
+    "OBS: detta söker i filernas innehåll, inte i filnamn — om du letar efter en fil baserat på " +
+    "dess namn/sökväg (t.ex. 'var ligger invite-member-command.ts?'), använd find_files istället.",
   inputSchema: searchFilesSchema,
   handler: async ({ query, path, filePattern, caseSensitive, regex }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -281,6 +310,64 @@ export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
   },
 };
 
+const findFilesSchema = z.object({
+  pattern: z
+    .string()
+    .describe(
+      "Glob-mönster eller substring att matcha mot FILNAMN/SÖKVÄG (inte innehåll), t.ex. " +
+        "'*.ts', '*invite*', 'src/**/*.test.ts'. Om mönstret inte innehåller något av tecknen " +
+        "* ? [ ] tolkas det som en substring-match mot hela den relativa sökvägen."
+    ),
+  path: z.string().default(".").describe("Mapp att söka inom, relativt sandbox-roten."),
+  caseSensitive: z.boolean().default(false),
+});
+
+export const findFilesTool: ToolDefinition<typeof findFilesSchema> = {
+  name: "find_files",
+  description:
+    "Hitta filer baserat på FILNAMN/SÖKVÄG (inte innehåll) inom sandboxen, med ripgrep --files. " +
+    "Read-only. Använd detta när du vet (eller gissar) hur filen heter men inte var den ligger — " +
+    "t.ex. find_files({ pattern: '*invite*' }) för att hitta alla filer med 'invite' i namnet. " +
+    "Komplement till search_files (som söker i filINNEHÅLL) och list_dir (som kräver att du redan är i rätt mapp).",
+  inputSchema: findFilesSchema,
+  handler: async ({ pattern, path, caseSensitive }, sandbox) => {
+    const abs = sandbox.resolve(path);
+
+    // Om mönstret inte ser ut som en glob (inga * ? [ ]), omvandla det till
+    // "*pattern*" så en enkel substring som "invite" fungerar intuitivt,
+    // precis som agenten i praktiken försökte göra manuellt.
+    const looksLikeGlob = /[*?\[\]]/.test(pattern);
+    const glob = looksLikeGlob ? pattern : `*${pattern}*`;
+
+    const args = [
+      "--files",
+      ...(caseSensitive ? ["--glob", glob] : ["--glob", glob, "--ignore-case"]),
+      ...[...DEFAULT_IGNORES].flatMap((dir) => ["--glob", `!${dir}`]),
+      "--",
+      abs,
+    ];
+
+    const { stdout } = await runRipgrep(args, sandbox.root);
+
+    const files = stdout
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((f) => relative(sandbox.root, f))
+      .sort();
+
+    if (files.length === 0) {
+      return `Inga filer matchade "${pattern}".`;
+    }
+    if (files.length > MAX_LIST_ENTRIES) {
+      return [
+        ...files.slice(0, MAX_LIST_ENTRIES),
+        `... (fler än ${MAX_LIST_ENTRIES} träffar, avkortat — förfina mönstret)`,
+      ].join("\n");
+    }
+    return files.join("\n");
+  },
+};
+
 // ---------------------------------------------------------------------------
 // DET ENDA SKRIVVERKTYGET
 // ---------------------------------------------------------------------------
@@ -314,5 +401,6 @@ export const allTools = [
   readFileTool,
   fileStatTool,
   searchFilesTool,
+  findFilesTool,
   writeFileTool,
 ];

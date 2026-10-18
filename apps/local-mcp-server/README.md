@@ -16,12 +16,22 @@ Read-only (context):
 - `read_file` – läs en fils innehåll (se "Outline-läge" nedan — default är en
   förkortad outline, inte hela filen)
 - `file_stat` – metadata (storlek, typ, senast ändrad)
-- `search_files` – sök text/regex i filinnehåll, implementerad med [ripgrep](https://github.com/BurntSushi/ripgrep)
+- `search_files` – sök text/regex i filINNEHÅLL, implementerad med [ripgrep](https://github.com/BurntSushi/ripgrep)
   (`rg` måste finnas på `PATH`, t.ex. `brew install ripgrep`). Stödjer:
   - `query` – text (default) eller regex om `regex: true`
   - `filePattern` – glob-filter, t.ex. `*.ts`
   - `caseSensitive` – default `false`
   - Hoppar automatiskt över `node_modules`, `.git`, `dist`, m.fl.
+- `find_files` – hitta filer baserat på FILNAMN/sökväg (inte innehåll), också
+  via ripgrep (`rg --files --glob`). Komplement till `search_files`
+  (innehåll) och `list_dir` (kräver att man redan är i rätt mapp):
+  - `pattern` – glob (`*.ts`, `src/**/*.test.ts`) eller en enkel substring
+    som `"invite"` (tolkas automatiskt som `*invite*`)
+  - `path` – mapp att söka inom, default sandbox-roten
+  - `caseSensitive` – default `false`
+  - Exempel: `find_files({ pattern: "invite-member-command" })` hittar filen
+    oavsett var i trädet den ligger, utan att du behöver gissa mappstruktur
+    eller gå via en innehålls-sökning.
 
 ### Outline-läge för `read_file`
 
@@ -240,7 +250,7 @@ explicit med `--disallowedTools`.
    ```
 
    Förväntat svar: enbart `mcp__local-fs__list_dir`, `read_file`, `file_stat`,
-   `search_files` och `write_file`.
+   `search_files`, `find_files` och `write_file`.
 
    **Viktigt att komma ihåg:** en vanlig, oinskränkt `claude`-session (utan
    `--bare`/`--disallowedTools`) har fortfarande fulla `Bash`/`Edit`/`Read`/
