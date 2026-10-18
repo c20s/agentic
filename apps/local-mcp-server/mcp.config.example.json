@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "local-fs": {
+      "command": "bun",
+      "args": [
+        "run",
+        "/Users/erihan/dev/c20s/agentic/apps/local-mcp-server/src/index.ts"
+      ]
+    }
+  }
+}
