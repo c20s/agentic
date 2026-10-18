@@ -27,7 +27,10 @@ emit_if_changed() {
 }
 
 fswatch -0 --event Updated --event Created --event Renamed \
+  --latency 0.4 \
   -e "$(git rev-parse --git-dir)" --exclude "\\.git/" \
+  --exclude "~$" --exclude "\\.sw[a-z]$" --exclude "\\.swp$" \
+  --exclude "4913$" --exclude "/node_modules/" \
   -r "$repo_root" |
 while IFS= read -r -d '' _; do
   emit_if_changed

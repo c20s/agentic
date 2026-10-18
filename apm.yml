@@ -4,5 +4,4 @@ description: Curated Claude Code and GitHub Copilot skills and agents.
 license: MIT
 targets:
   - claude
-  - copilot
 includes: auto

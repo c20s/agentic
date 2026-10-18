@@ -49,15 +49,14 @@ description: Applies the user's comments and naive implementations as real code 
      the last commit is already the "shadow copy."
    - `.git/` itself is excluded from the watch so Claude's own commits or
      index updates don't self-trigger a tick.
-4. After starting it, verify the loop is actually alive (e.g.
-   `ps aux | grep watch.sh`) rather than trusting that the `Monitor` tool
-   call succeeding means the script itself is running.
+4. A zero exit from the background launch means the loop is running —
+   don't also shell out to `ps`/`grep` to double-check. If `Monitor` later
+   reports the task exited, diagnose from its output then, not before.
 5. On wake, read `/tmp/claude-copilot-lastdiff-<run-id>` (the unified diff
-   for this tick), not the full file, and scan only the added (`+`) lines
+   for this tick), not the full file, and scan only the added (`+`) lines.
 6. If you find a `todo` comment or a naive/stubbed implementation in the
-   same diff hunk, think about how to implement, refactor, or update it —
-   same apply-only rule as a marker: make the change, no proposal
-   round-trip.
+   same diff hunk, or a markdown roadmap checkbox with `- [!]` in it, make
+   the change directly — no proposal round-trip, no narration of the plan.
 7. After every file you change, stop and make a commit for that file with
    a conventional commit message, including a body with lines max 80
    chars long.
@@ -66,6 +65,14 @@ description: Applies the user's comments and naive implementations as real code 
    the user touching anything:
    `nvim --server <socket> --remote-send '<Esc>:checktime<CR>'`.
 10. Repeat until the user ends the session.
+
+## Output discipline
+
+Stay silent between ticks. Don't narrate setup steps, Monitor re-arms, or
+"nothing to do this tick" — the loop runs unattended. The only user-visible
+output per tick is: the file(s) changed, the edit made, and the commit. If
+a tick's diff has no marker/todo/stub in it, make no commit and say
+nothing.
 
 ## Scope
 
