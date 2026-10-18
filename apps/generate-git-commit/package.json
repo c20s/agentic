@@ -1,0 +1,8 @@
+{
+  "name": "generate-git-commit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install-hooks": "bun run install-commit-hooks.ts"
+  }
+}
