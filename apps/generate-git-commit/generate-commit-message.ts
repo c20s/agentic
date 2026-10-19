@@ -74,7 +74,7 @@ const main = async () => {
       const answer = await rl.question("Generera commit-meddelande med Claude? [Y/n] ");
       rl.close();
       ttyStream.destroy();
-      await tty.close();
+      //await tty.close();
       if (answer.trim().toLowerCase().startsWith("n")) {
         process.exit(0);
       }
@@ -90,11 +90,15 @@ const main = async () => {
       "stream-json",
       "--include-partial-messages",
       "--verbose",
-      "--restricted",
+      "--bare",
       "--disable-slash-commands",
       "--strict-mcp-config",
+      "--settings",
+      join(homedir(), ".claude", "settings.json"),
+      "--setting-sources",
+      "user"
     ],
-    { stdout: "pipe", stderr: "pipe" },
+    { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
   );
 
   process.stderr.write("Claude genererar commit-meddelande...\n");
@@ -138,6 +142,7 @@ const main = async () => {
 
   const existing = await readFile(msgFile, "utf8");
   await writeFile(msgFile, `${message.trim()}\n${existing}`);
+  process.exit(0);
 };
 
 main();

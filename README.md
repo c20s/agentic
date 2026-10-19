@@ -165,3 +165,7 @@ full details on the server itself.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Upcoming features
+
+- [ ] Skills tool, depending on what file is read, get a set of available skils for that file for the agent to use, also a tool to get get a tree of skill references that is really small from the start like, review, edit, research, that drills down to more specific skills depending on the task
