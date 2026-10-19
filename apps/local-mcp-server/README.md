@@ -102,6 +102,7 @@ adding a new export — without ever needing to read or rewrite the rest of
 the file it didn't care about.
 
 Recommended flow for the agent:
+
 1. `read_file` (outline or `symbol`) to find and understand the right spot
 2. `edit_file` to make the targeted change
 3. `write_file` only when creating a brand new file, or when the whole file
@@ -189,7 +190,7 @@ tail -f ~/.claude/mcp-local-fs.summary.log
 ```
 
 ```
-2026-10-18T19:49:53.389Z [1efcb748] [info] Started. Sandbox root: /Users/erihan/dev/c20s/golden-project. PID: 23405. Session: 1efcb748.
+2026-10-18T19:49:53.389Z [1efcb748] [info] Started. Sandbox root: /Users/<user>/dev/c20s/golden-project. PID: 23405. Session: 1efcb748.
 2026-10-18T19:49:53.390Z [1efcb748] [info] To follow just this session: tail -f ~/.claude/mcp-local-fs.summary.log | grep 1efcb748
 2026-10-18T19:49:55.617Z [1efcb748] ok    find_files         134B    21ms
 2026-10-18T19:49:57.816Z [1efcb748] ok    read_file          591B    19ms
@@ -240,8 +241,8 @@ Add to your MCP configuration (e.g. `~/.claude.json` or the equivalent
       "command": "bun",
       "args": [
         "run",
-        "/Users/erihan/dev/c20s/agentic/apps/local-mcp-server/src/index.ts",
-        "/Users/erihan/dev/my-project"
+        "/Users/<user>/path/to/agentic/apps/local-mcp-server/src/index.ts",
+        "/Users/<user>/dev/my-project"
       ]
     }
   }
@@ -274,7 +275,7 @@ blocked explicitly with `--disallowedTools`.
          "command": "bun",
          "args": [
            "run",
-           "/Users/erihan/dev/c20s/agentic/apps/local-mcp-server/src/index.ts"
+           "/Users/<user>/path/to/agentic/apps/local-mcp-server/src/index.ts"
          ]
        }
      }

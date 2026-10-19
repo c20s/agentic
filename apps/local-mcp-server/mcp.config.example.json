@@ -4,7 +4,7 @@
       "command": "bun",
       "args": [
         "run",
-        "/Users/erihan/dev/c20s/agentic/apps/local-mcp-server/src/index.ts"
+        "/Users/<user>/path/to/agentic/apps/local-mcp-server/src/index.ts"
       ]
     }
   }
