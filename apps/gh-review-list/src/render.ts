@@ -26,8 +26,10 @@ function commentIcon(pr: EnrichedPullRequest): string {
 
 /** Visible width of a string, treating common emoji as width 2 (good enough for our fixed icon set). */
 function displayWidth(text: string): number {
-  // Strip ANSI escapes before measuring.
-  const stripped = text.replace(/\x1b\[[0-9;]*m/g, "");
+  // Strip ANSI SGR color codes and OSC-8 hyperlink escapes (`\x1b]8;;url\x1b\`...`\x1b]8;;\x1b\`)
+  // before measuring — otherwise a hyperlinked cell's URL gets counted as visible text, throwing
+  // off padding for every column after it.
+  const stripped = text.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "");
   let width = 0;
   for (const ch of stripped) {
     const code = ch.codePointAt(0) ?? 0;
