@@ -60,6 +60,19 @@ export const TOOL_GUIDE: Record<string, string> = {
     "you have actually read the whole file (full:true) first — never overwrite a file you haven't fully read, " +
     "you will likely destroy content you didn't know was there.",
 
+  delete_file:
+    "Delete a file or directory within the sandbox. This is NOT a permanent delete: under the hood it's " +
+    "implemented as a move of the target into a trash folder under the user's HOME directory — " +
+    "'~/.trash/c20s/<sessionId>/<timestamp>/<relative path>' — deliberately OUTSIDE the sandbox/project " +
+    "entirely, where <sessionId> is this server session's id, <timestamp> is the moment delete_file was " +
+    "called, and <relative path> is the original path of the deleted file/directory relative to the sandbox " +
+    "root (preserved in full, not just its name). Every call gets its own timestamped folder, so repeated " +
+    "deletes never collide/overwrite each other, and everything removed together in one call ends up " +
+    "together.\n\n" +
+    "Because it's a move rather than a real delete, anything removed this way can still be found and " +
+    "restored by hand afterwards from '~/.trash/c20s/...'. The sandbox root itself cannot be deleted. There " +
+    "is no automatic cleanup of '~/.trash' — it accumulates across sessions/projects until removed manually.",
+
   find_files:
     "Find files based on FILE NAME/PATH (not content) within the sandbox, using ripgrep --files. Use this " +
     "when you know (or are guessing) a file's name but not where it lives — e.g. " +

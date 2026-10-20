@@ -119,11 +119,22 @@ Write (the only ways to change anything):
   entire file is overwritten). Use this to create new files, or when you
   deliberately want to replace an entire file and have actually read it in
   full (`full: true`) first.
+- `delete_file` – delete a file or directory. **Not a real delete**: under
+  the hood it moves the target into a trash folder under the **user's home
+  directory** (deliberately outside the sandbox/project entirely), at
+  `~/.trash/c20s/<sessionId>/<timestamp>/<relative path>`, using the current
+  server session's id, the moment of the call, and the item's original
+  relative path (preserved in full, not just its file name). Every call
+  gets its own timestamped folder, so deletions never collide, and anything
+  removed can still be recovered by hand from `~/.trash/c20s/...`
+  afterwards. The sandbox root itself cannot be deleted. Nothing ever
+  cleans `~/.trash` up automatically — that's a deliberate choice (see
+  "Limitations / deliberate choices" below).
 
-There is **no** tool for deleting files, running shell commands, moving
-files, etc. If you want to extend the server with more write operations, add
-them explicitly in `src/tools.ts` and think through the consequences — keep
-the write surface as narrow as possible.
+There is **no** tool for running shell commands, moving files to an
+arbitrary destination, etc. If you want to extend the server with more write
+operations, add them explicitly in `src/tools.ts` and think through the
+consequences — keep the write surface as narrow as possible.
 
 ### Outline mode for `web_fetch`
 
@@ -555,7 +566,15 @@ blocked explicitly with `--disallowedTools`.
   etc.
 - `write_file` overwrites the entire file (no patch/diff logic) — simplest
   to reason about and review; use `edit_file` for targeted changes instead.
-- No destructive tools (delete, move, exec) exist by design.
+- No destructive tools in the traditional sense (permanent delete, arbitrary
+  move, exec) exist by design. `delete_file` exists but is non-destructive:
+  it moves the target into
+  `~/.trash/c20s/<sessionId>/<timestamp>/<relative path>` under the user's
+  home directory — outside the sandbox entirely — instead of removing it,
+  so a mistaken or malicious delete is always recoverable and the trash
+  folder itself never shows up inside the project. Nothing ever prunes
+  `~/.trash` automatically — that's left to a human, on purpose, rather
+  than silently expiring "deleted" data on a timer.
 - `search_files` requires `ripgrep` (`rg`) installed on the system and on
   `PATH`. The server runs `rg` as a subprocess (`Bun.spawn`) with `--json`
   for robust result parsing. The path (`path` argument) is validated and

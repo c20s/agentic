@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, stat, rename, cp, rm } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
+import { homedir } from "node:os";
 import type { Sandbox } from "./sandbox";
 import {
   outlineKindForFile,
@@ -12,8 +13,20 @@ import {
 } from "./outline";
 import { webTools } from "./web";
 import { getToolHelp } from "./tool-help";
+import { logger } from "./logger";
 
 // File types/directories we never want to list or read by accident (noise/secrets).
+/** Namespace subfolder under the trash root, to keep this tool's trash distinguishable from others. */
+const TRASH_NAMESPACE = "c20s";
+
+/**
+ * delete_file never deletes — it moves things here instead. Deliberately OUTSIDE the sandbox
+ * (under the user's home directory, like the server's own logs — see src/logger.ts), so trashed
+ * files/dirs are never visible to list_dir/search_files/find_files on the project itself, and a
+ * trash folder can never end up nested inside the very sandbox it's protecting.
+ */
+const TRASH_ROOT = `${homedir()}/.trash/${TRASH_NAMESPACE}`;
+
 const DEFAULT_IGNORES = new Set([
   "node_modules",
   ".git",
@@ -435,6 +448,65 @@ export const editFileTool: ToolDefinition<typeof editFileSchema> = {
 // ON-DEMAND DOCS (kept out of every other tool's description — see tool-help.ts)
 // ---------------------------------------------------------------------------
 
+const deleteFileSchema = z.object({
+  path: z.string().describe("Path to an existing file or directory, relative to sandbox root, to delete."),
+});
+
+export const deleteFileTool: ToolDefinition<typeof deleteFileSchema> = {
+  name: "delete_file",
+  description:
+    "Delete a file or directory within the sandbox. Not a real delete: it MOVES the target into a " +
+    "per-session, per-call trash folder under the user's home directory (~/.trash/...), so deletions " +
+    "are always recoverable by hand.",
+  inputSchema: deleteFileSchema,
+  handler: async ({ path }, sandbox) => {
+    const abs = sandbox.resolve(path);
+
+    let st;
+    try {
+      st = await stat(abs);
+    } catch {
+      throw new Error(`"${path}" does not exist.`);
+    }
+
+    const relPath = sandbox.toRelative(abs);
+    if (relPath === ".") {
+      throw new Error(`Refusing to delete "${path}": it is the sandbox root.`);
+    }
+
+    // ~/.trash/c20s/<sessionId>/<timestamp>/<relative path>
+    // One subfolder per session, and within it one per delete call (timestamp, plus a short
+    // random suffix in case two deletes land in the same millisecond), so repeated deletes
+    // never collide and everything removed in a single call is easy to find together. The
+    // original relative path (not just the basename) is preserved under the timestamp, so
+    // e.g. deleting "src/foo.ts" and "lib/foo.ts" in the same call don't collide either.
+    // Deliberately lives under the user's home directory, NOT the sandbox root — see TRASH_ROOT.
+    const timestamp = `${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}`;
+    const dest = join(TRASH_ROOT, logger.sessionId, timestamp, relPath);
+
+    await mkdir(dirname(dest), { recursive: true });
+    try {
+      await rename(abs, dest);
+    } catch (err: any) {
+      // rename() can't cross filesystem/device boundaries (e.g. project on a different disk/
+      // volume than the home directory, common in containers) — fall back to copy-then-remove
+      // in that specific case only, so the trash root can safely live outside the sandbox.
+      if (err?.code === "EXDEV") {
+        await cp(abs, dest, { recursive: true });
+        await rm(abs, { recursive: true, force: true });
+      } else {
+        throw err;
+      }
+    }
+
+    const kind = st.isDirectory() ? "directory" : "file";
+    return (
+      `Deleted ${kind} ${relPath} (moved to ${dest}). ` +
+      `This is a move, not a permanent delete — recover it from there if needed.`
+    );
+  },
+};
+
 const toolHelpSchema = z.object({
   name: z.string().describe("Tool name, e.g. 'read_file' or 'web_fetch'."),
 });
@@ -457,6 +529,7 @@ export const allTools = [
   findFilesTool,
   writeFileTool,
   editFileTool,
+  deleteFileTool,
   toolHelpTool,
   ...webTools,
 ];
