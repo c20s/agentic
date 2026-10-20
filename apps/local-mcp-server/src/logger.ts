@@ -166,6 +166,21 @@ function summarizeArgs(toolName: string, args: unknown): string {
       const path = typeof a.path === "string" ? a.path : ".";
       return truncate(path, SUMMARY_ARG_MAX_LEN);
     }
+    case "web_fetch": {
+      const url = typeof a.url === "string" ? a.url : "";
+      const extras: string[] = [];
+      if (a.section) extras.push(`section:${a.section}`);
+      if (a.full) extras.push("full");
+      if (a.raw) extras.push("raw");
+      if (a.render && a.render !== "auto") extras.push(`render:${a.render}`);
+      const suffix = extras.length > 0 ? ` (${extras.join(", ")})` : "";
+      const urlBudget = Math.max(10, SUMMARY_ARG_MAX_LEN - suffix.length);
+      return `${truncatePathFront(url, urlBudget)}${suffix}`;
+    }
+    case "web_search": {
+      const query = typeof a.query === "string" ? a.query : "";
+      return `"${truncate(query, SUMMARY_ARG_MAX_LEN - 2)}"`;
+    }
     default:
       return "";
   }

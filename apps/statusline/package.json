@@ -1,0 +1,20 @@
+{
+  "name": "statusline",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "pnpm": ">=12"
+  },
+  "scripts": {
+    "start": "bun run statusline.ts",
+    "costs": "bun run claude-costs.ts",
+    "usage": "bun run claude-usage.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.3",
+    "bun-types": "1.4.3",
+    "typescript": "5.9.3"
+  }
+}

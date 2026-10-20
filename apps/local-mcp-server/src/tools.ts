@@ -10,6 +10,7 @@ import {
   extractJsonValueAtPath,
   extractYamlValueAtPath,
 } from "./outline";
+import { webTools } from "./web";
 
 // File types/directories we never want to list or read by accident (noise/secrets).
 const DEFAULT_IGNORES = new Set([
@@ -502,4 +503,5 @@ export const allTools = [
   findFilesTool,
   writeFileTool,
   editFileTool,
+  ...webTools,
 ];

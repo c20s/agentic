@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+
+# Supply-chain safety net: don't let pnpm install/fetch a dependency
+# version (direct or transitive) until it has been published for at
+# least 7 days (10080 minutes). Most malicious/broken releases are
+# caught and unpublished within that window.
+# Requires pnpm >= 10.16.0 — https://pnpm.io/settings/dependency-resolution#minimumreleaseage
+minimumReleaseAge: 10080

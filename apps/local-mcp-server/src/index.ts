@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { Sandbox } from "./sandbox";
 import { allTools } from "./tools";
 import { logger } from "./logger";
+import { closeBrowser } from "./browser";
 
 /**
  * Sandbox root: where the agent is allowed to read/write.
@@ -67,3 +68,14 @@ main().catch((err) => {
   logger.info(`Failed to start: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });
+
+// Make sure a lazily-launched headless Chromium (for web_fetch rendering) never lingers
+// as an orphaned process after the MCP server itself shuts down.
+async function shutdown(signal: string) {
+  logger.info(`Received ${signal}, shutting down.`);
+  await closeBrowser();
+  process.exit(0);
+}
+
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));

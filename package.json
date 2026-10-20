@@ -2,6 +2,10 @@
   "name": "agentic",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "pnpm": ">=12"
+  },
   "scripts": {
     "logs:tail": "tail -f ~/.claude/mcp-local-fs.summary.log",
     "logs:tail:detail": "tail -f ~/.claude/mcp-local-fs.log",

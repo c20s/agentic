@@ -32,6 +32,15 @@ Read-only (context):
   - Example: `find_files({ pattern: "invite-member-command" })` finds the file
     regardless of where in the tree it lives, without you needing to guess
     the directory structure or go via a content search.
+- `web_fetch` – fetch a single http(s) URL (GET only, no cookies/auth/state).
+  HTML is converted to markdown-ish readable text and, like `read_file`, an
+  **outline** (title + headings) is returned by default instead of the whole
+  page — see "Outline mode for `web_fetch`" below. Single-page apps are
+  handled by optionally rendering the page with a real headless browser
+  first — see "Rendering single-page apps (`render`)" below.
+- `web_search` – search the web (backed by DuckDuckGo's no-JS HTML results
+  page, so no API key is needed) and return a list of `{ title, url,
+  snippet }` results. Pair with `web_fetch` to read a specific result.
 
 ### Outline mode for `read_file`
 
@@ -87,6 +96,99 @@ files, etc. If you want to extend the server with more write operations, add
 them explicitly in `src/tools.ts` and think through the consequences — keep
 the write surface as narrow as possible.
 
+### Outline mode for `web_fetch`
+
+Same philosophy as `read_file`'s outline mode, applied to web pages: a full
+HTML page converted to text can easily be tens of thousands of characters,
+which is wasteful if the agent only needs one section of it (e.g. one entry
+in a changelog, one section of a docs page).
+
+`web_fetch` converts HTML into a lightweight markdown representation first
+(headings become `#`/`##`/etc., links become `[text](url)`, resolved to
+absolute URLs) and then reuses the exact same heading-outline/section logic
+from `src/outline.ts` as `read_file` uses for local `.md` files:
+
+- **Default** (no `full`/`section`): if the converted page is larger than a
+  small threshold (~4,000 chars) and has at least one heading, only the page
+  title + outline of headings is returned (with line-number-free indentation
+  by level, since "line numbers" aren't meaningful for a fetched page).
+  Smaller pages, or pages with no headings at all, are returned in full
+  directly since there's nothing meaningful to outline.
+- **`section: "<heading text>"`** – like `read_file`'s `symbol`: matches a
+  heading by substring (case-insensitive) and returns that heading's full
+  content through the next heading of equal-or-higher level.
+- **`full: true`** – skip outline mode, return the entire converted page
+  (still subject to the overall size cap below).
+- **`raw: true`** – bypass HTML→markdown conversion and outline mode
+  entirely; returns the response body as-is. Useful for JSON APIs or plain
+  text endpoints. Takes precedence over `full`/`section`.
+
+Typical flow: `web_fetch({ url })` → see the outline → `web_fetch({ url,
+section: "Installation" })` to read just that part.
+
+### Rendering single-page apps (`render`) for `web_fetch`
+
+A plain `fetch()` only gets you the server-sent HTML — for a client-rendered
+SPA (React/Vue/Angular/Svelte/etc.) that's often just an empty shell like
+`<div id="root"></div>` plus a pile of `<script>` tags, with none of the
+actual content. `web_fetch` can drive a real headless browser
+([Playwright](https://playwright.dev), via the `playwright-core` package) to
+execute the page's JavaScript first and then read the fully rendered DOM.
+
+- **`render: "auto"`** (default) – fetch statically first (fast, no browser
+  needed for the ~90% of the web that's plain server-rendered HTML). The
+  result is checked against a few heuristics for "this looks like an
+  unrendered SPA shell":
+  - a `<noscript>` block that says JavaScript is required
+  - a near-empty known SPA mount point (`#root`, `#app`, `#__next`,
+    `#___gatsby`, etc.)
+  - a page that's mostly `<script>` tags with almost no visible text
+  
+  If any of those match, `web_fetch` transparently re-fetches the page with
+  headless Chromium and returns the rendered content instead — you don't
+  need to know up front whether a given URL is a SPA.
+- **`render: "always"`** – skip the heuristics and always render with a
+  headless browser. Useful if you know a site is a SPA, or if `auto`'s
+  heuristics happened to miss a particular page.
+- **`render: "never"`** – never render, even if the page looks like an
+  unrendered SPA shell. Fastest/lightest option when you specifically want
+  the raw server response (e.g. to inspect what a non-JS client/crawler
+  would see).
+
+The rendered page goes through the exact same outline/`section`/`full`
+pipeline as a statically fetched one — from the caller's point of view,
+rendering is an implementation detail, not a different response shape. The
+response header gets an extra `rendered: js` tag when a browser render was
+used, so it's visible at a glance which path was taken, e.g.:
+
+```
+[https://example.com/app — HTTP 200, content-type: text/html, rendered: js]
+```
+
+**Setup**: `playwright-core` is an **optional** dependency (see
+`package.json`) so installing/running the rest of the server never requires
+it. To actually use rendering:
+
+```bash
+cd apps/local-mcp-server
+bun install                       # installs playwright-core itself
+bunx playwright install chromium  # downloads a Chromium binary (one-time, ~150-300MB)
+```
+
+If `playwright-core` isn't installed, or no Chromium binary is available,
+`render: "auto"` degrades gracefully: it still returns the static HTML it
+already fetched, with a note appended explaining that rendering was
+attempted and failed (and why). `render: "always"` instead surfaces that
+failure as an error, since rendering was explicitly requested.
+
+A single headless Chromium instance is launched lazily on first use and
+reused for the life of the server process (not relaunched per request), and
+closed automatically on server shutdown (`SIGINT`/`SIGTERM`). Each `web_fetch`
+render runs in its own isolated browser context (so no cookies/state leak
+between calls), with image/font/media requests blocked to keep rendering
+fast and light, and the same timeout/size caps as the rest of `web_fetch`
+apply to rendered pages too.
+
 ### Why both `edit_file` and `write_file`?
 
 Outline mode (above) is excellent for **reading/understanding** code
@@ -131,6 +233,13 @@ The server speaks MCP over stdio (standard for local MCP servers) and logs
 status to stderr, so it doesn't interfere with the JSON-RPC traffic on
 stdout.
 
+Optional, only needed for `web_fetch`'s SPA rendering (see "Rendering
+single-page apps" below) — everything else works without this:
+
+```bash
+bunx playwright install chromium
+```
+
 ## Monitoring what the agent is actually doing
 
 When Claude Code (e.g. via the `ai` alias) starts a session, it spawns the
@@ -145,9 +254,9 @@ log files:
 - **Summary log** (`~/.claude/mcp-local-fs.summary.log`) – one compact line
   per call: session id, tool name, a short best-effort argument summary
   (e.g. the file path for `read_file`/`write_file`/`edit_file`, the query for
-  `search_files`, the pattern for `find_files`), result size in bytes,
-  duration, ok/error. Good for a quick, high-level overview of activity
-  without needing the detail log.
+  `search_files`, the pattern for `find_files`, the URL for `web_fetch`, the
+  query for `web_search`), result size in bytes, duration, ok/error. Good for
+  a quick, high-level overview of activity without needing the detail log.
 - **Detail log** (`~/.claude/mcp-local-fs.log`) – full arguments and a
   preview of the result/error for every call. Good for debugging exactly
   what an agent read, searched for, or wrote.
@@ -169,12 +278,16 @@ ok    read_file          829B    17ms  command-api/packages/member-context/src/a
 ok    read_file          288B     5ms  command-api/packages/member-context/src/app-commands/invite-member-command.ts (symbol:inviteMember)
 ok    search_files       360B    11ms  "logInvited"
 ok    read_file         7763B     1ms  pnpm-lock.yaml (full)
+ok    web_search         612B   340ms  "claude code mcp channels"
+ok    web_fetch          418B   890ms  https://code.claude.com/docs/en/channels
+ok    web_fetch         3102B   910ms  https://code.claude.com/docs/en/channels (section:Overview)
 ```
 
-Note the `(symbol:...)` / `(full)` suffixes on `read_file` lines — these make
-it possible to tell at a glance whether a call fetched the outline, a
-specific symbol, or the entire file, which otherwise looks identical in the
-summary log (same tool name, same path).
+Note the `(symbol:...)` / `(full)` suffixes on `read_file` lines, and the
+`(section:...)` / `(full)` / `(raw)` suffixes on `web_fetch` lines — these
+make it possible to tell at a glance whether a call fetched the outline, a
+specific symbol/section, or the entire file/page, which otherwise looks
+identical in the summary log (same tool name, same path/URL).
 
 Since the server runs over stdio, each Claude Code session spawns its own
 server process — so "session" here means one server process instance,
@@ -328,7 +441,12 @@ blocked explicitly with `--disallowedTools`.
    - `--disable-slash-commands` – no slash commands.
    - `--disallowedTools "Bash,Edit,Read,Write,..."` – **this is critical**:
      blocks Claude Code's built-in filesystem/shell tools so that
-     `mcp__local-fs__*` becomes the only remaining path to disk.
+     `mcp__local-fs__*` becomes the only remaining path to disk. `WebFetch`
+     and `WebSearch` are included here too: this server provides its own
+     `web_fetch`/`web_search` (see "Tools" above), so keep blocking the
+     *built-in* versions even though the agent still has (sandboxed,
+     logged) web access through this MCP — the point is one single,
+     auditable path in/out, not zero network access.
 
    In practice: put the whole command in a shell alias, e.g. in `~/.zshrc`:
 
@@ -346,7 +464,8 @@ blocked explicitly with `--disallowedTools`.
    ```
 
    Expected answer: only `mcp__local-fs__list_dir`, `read_file`, `file_stat`,
-   `search_files`, `find_files`, `edit_file` and `write_file`.
+   `search_files`, `find_files`, `edit_file`, `write_file`, `web_fetch` and
+   `web_search`.
 
    **Important to remember:** a normal, unrestricted `claude` session
    (without `--bare`/`--disallowedTools`) still has full `Bash`/`Edit`/`Read`/
@@ -369,3 +488,26 @@ blocked explicitly with `--disallowedTools`.
   for robust result parsing. The path (`path` argument) is validated and
   locked to the sandbox *before* `rg` is invoked, so traversal attempts via
   that argument are stopped by our own sandbox layer, not by ripgrep.
+- `web_fetch`/`web_search` are **not** bound to the filesystem sandbox (there's
+  no local root concept for the network), but have their own guardrails:
+  GET only, no cookies/auth/redirected-state carried across requests, a
+  15s timeout, a response size cap (~1MB fetched / ~50,000 chars returned to
+  the model), and requests to `localhost`/loopback/private
+  (`10.x`, `172.16-31.x`, `192.168.x`)/link-local (incl. the
+  `169.254.169.254` cloud metadata address) hosts are rejected — including
+  after following redirects — to prevent SSRF via a malicious or
+  prompt-injected URL.
+- `web_search` is implemented by parsing DuckDuckGo's no-JS HTML results
+  page rather than calling a paid search API, so no API key/config is
+  required to use it out of the box. This is a best-effort HTML scrape and
+  may need updating if DuckDuckGo changes that page's markup.
+- `web_fetch`'s optional headless-browser rendering (`playwright-core`) is a
+  meaningfully larger attack/resource surface than a plain `fetch()` — it
+  executes arbitrary third-party JavaScript. The same SSRF host checks are
+  re-applied to the browser's final URL after any client-side
+  navigation/redirect, each render uses a fresh, isolated browser context
+  (no shared cookies/storage across calls), and image/font/media requests
+  are blocked. It's still a real browser engine, though, so only enable
+  rendering (`bunx playwright install chromium`) if you're comfortable with
+  that trade-off; `render: "never"` disables it per-call, and simply not
+  installing `playwright-core` disables it server-wide.
