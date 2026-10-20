@@ -64,16 +64,22 @@ function parseSkillMd(raw: string): { description: string; body: string } {
   return { description, body };
 }
 
+let cachedSkills: ApmSkill[] | undefined;
+
 /**
  * Discovers every `.apm/skills/<name>/SKILL.md` in THIS repo (the one
  * `local-mcp-server` itself lives in) — not the sandboxed project the server
  * currently happens to be pointed at. Returns an empty array (not an error)
- * if `.apm/skills` doesn't exist.
+ * if `.apm/skills` doesn't exist. Result is cached for the life of the process.
  *
  * Exported so other tools (e.g. `review.ts`'s review-context tool) can look
  * up and apply a specific skill by name without duplicating this logic.
  */
 export function loadApmSkills(): ApmSkill[] {
+  if (cachedSkills) {
+    return cachedSkills;
+  }
+
   let entries: string[];
   try {
     entries = readdirSync(APM_SKILLS_DIR, { withFileTypes: true })
@@ -81,7 +87,7 @@ export function loadApmSkills(): ApmSkill[] {
       .map((e) => e.name)
       .sort();
   } catch {
-    return [];
+    return (cachedSkills = []);
   }
 
   const skills: ApmSkill[] = [];
@@ -95,7 +101,7 @@ export function loadApmSkills(): ApmSkill[] {
     const { description, body } = parseSkillMd(raw);
     skills.push({ name, description, body, references: listReferenceFiles(name) });
   }
-  return skills;
+  return (cachedSkills = skills);
 }
 
 /** Lists `<skill>/references/*.md` file names (not full paths), sorted. Empty array if the dir doesn't exist. */
@@ -139,7 +145,10 @@ export function getContext(symbol: string | undefined): string {
   const referenceMatch = symbol.match(REFERENCE_SYMBOL_PATTERN);
   if (referenceMatch) {
     const [, skillName, fileName] = referenceMatch;
-    return loadSkillReference(skillName!, fileName!);
+    if (skillName === undefined || fileName === undefined) {
+      return `Internal error: REFERENCE_SYMBOL_PATTERN matched "${symbol}" without both capture groups.`;
+    }
+    return loadSkillReference(skillName, fileName);
   }
 
   const skills = loadApmSkills();

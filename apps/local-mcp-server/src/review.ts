@@ -104,8 +104,15 @@ function parseUnifiedDiff(patch: string): DiffHunk[] {
   return hunks;
 }
 
-async function runGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+interface CommandResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+/** Spawns `bin args...`, collects stdout/stderr fully, and waits for exit — shared by `runGit`/`runGh`. */
+async function runCommand(bin: string, args: string[], opts?: { cwd?: string }): Promise<CommandResult> {
+  const proc = Bun.spawn([bin, ...args], { cwd: opts?.cwd, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -114,14 +121,12 @@ async function runGit(args: string[], cwd: string): Promise<{ stdout: string; st
   return { stdout, stderr, exitCode };
 }
 
-async function runGh(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { stdout, stderr, exitCode };
+function runGit(args: string[], cwd: string): Promise<CommandResult> {
+  return runCommand("git", args, { cwd });
+}
+
+function runGh(args: string[]): Promise<CommandResult> {
+  return runCommand("gh", args);
 }
 
 type DiffRangeArgs = string[];
@@ -143,18 +148,42 @@ async function discoverChangedFiles(rangeArgs: DiffRangeArgs, cwd: string, inclu
   return [...new Set([...tracked, ...untrackedFiles])];
 }
 
+/** True if `file` isn't tracked by git at all (i.e. `git ls-files` doesn't know about it). */
+async function isUntracked(file: string, sandbox: Sandbox): Promise<boolean> {
+  const tracked = await runGit(["ls-files", "--error-unmatch", "--", file], sandbox.root);
+  return tracked.exitCode !== 0;
+}
+
 async function getFileDiff(
   file: string,
   rangeArgs: DiffRangeArgs,
   sandbox: Sandbox,
   options: { treatUntrackedAsAdded: boolean }
 ): Promise<FileDiff> {
-  if (options.treatUntrackedAsAdded) {
-    const tracked = await runGit(["ls-files", "--error-unmatch", "--", file], sandbox.root);
-    if (tracked.exitCode !== 0) {
-      const snapshot = await getWholeFileSnapshot(file, sandbox);
-      return { ...snapshot, status: "added" };
-    }
+  if (options.treatUntrackedAsAdded && (await isUntracked(file, sandbox))) {
+    const snapshot = await getWholeFileSnapshot(file, sandbox);
+    return { ...snapshot, status: "added" };
+  }
+
+  const meta = await getFileDiffMeta(file, rangeArgs, sandbox.root);
+
+  const base: FileDiff = {
+    file,
+    status: meta.status,
+    renamedFrom: meta.renamedFrom,
+    additions: meta.additions,
+    deletions: meta.deletions,
+    hunks: [],
+  };
+
+  if (meta.isBinary) {
+    return { ...base, collapsedReason: "binary" };
+  }
+  if (isAlwaysCollapsed(file)) {
+    return { ...base, collapsedReason: "lockfile" };
+  }
+  if (meta.additions + meta.deletions > MAX_INLINE_DIFF_LINES) {
+    return { ...base, collapsedReason: "too-large" };
   }
 
   const { stdout, exitCode, stderr } = await runGit(
@@ -165,32 +194,48 @@ async function getFileDiff(
     throw new Error(`git diff failed for ${file}: ${stderr.trim() || `exit code ${exitCode}`}`);
   }
 
-  const additions = (stdout.match(/^\+[^+]/m) ?? []).length;
-  const deletions = (stdout.match(/^-[^-]/m) ?? []).length;
-  const isBinary = /^Binary files .* differ$/m.test(stdout);
-  const renameMatch = stdout.match(/^rename from (.+)$/m);
-  const status: FileDiff["status"] = /^deleted file mode/m.test(stdout)
+  return { ...base, hunks: parseUnifiedDiff(stdout) };
+}
+
+interface FileDiffMeta {
+  status: FileDiff["status"];
+  renamedFrom?: string;
+  additions: number;
+  deletions: number;
+  isBinary: boolean;
+}
+
+async function getFileDiffMeta(file: string, rangeArgs: DiffRangeArgs, cwd: string): Promise<FileDiffMeta> {
+  const [numstat, nameStatus] = await Promise.all([
+    runGit(["diff", "--numstat", ...rangeArgs, "--", file], cwd),
+    runGit(["diff", "--name-status", "-M", ...rangeArgs, "--", file], cwd),
+  ]);
+  if (numstat.exitCode !== 0) {
+    throw new Error(`git diff --numstat failed for ${file}: ${numstat.stderr.trim() || `exit code ${numstat.exitCode}`}`);
+  }
+  if (nameStatus.exitCode !== 0) {
+    throw new Error(
+      `git diff --name-status failed for ${file}: ${nameStatus.stderr.trim() || `exit code ${nameStatus.exitCode}`}`
+    );
+  }
+
+  const numstatFields = numstat.stdout.trim().split("\t");
+  const isBinary = numstatFields[0] === "-" && numstatFields[1] === "-";
+  const additions = isBinary ? 0 : Number(numstatFields[0] ?? 0);
+  const deletions = isBinary ? 0 : Number(numstatFields[1] ?? 0);
+
+  const nameStatusFields = nameStatus.stdout.trim().split("\t");
+  const statusCode = nameStatusFields[0] ?? "";
+  const renamedFrom = statusCode.startsWith("R") ? nameStatusFields[1] : undefined;
+  const status: FileDiff["status"] = statusCode.startsWith("D")
     ? "deleted"
-    : /^new file mode/m.test(stdout)
+    : statusCode.startsWith("A")
       ? "added"
-      : renameMatch
+      : statusCode.startsWith("R")
         ? "renamed"
         : "modified";
 
-  const base: FileDiff = {
-    file,
-    status,
-    renamedFrom: renameMatch?.[1],
-    additions,
-    deletions,
-    hunks: [],
-  };
-
-  if (isBinary) return { ...base, collapsedReason: "binary" };
-  if (isAlwaysCollapsed(file)) return { ...base, collapsedReason: "lockfile" };
-  if (additions + deletions > MAX_INLINE_DIFF_LINES) return { ...base, collapsedReason: "too-large" };
-
-  return { ...base, hunks: parseUnifiedDiff(stdout) };
+  return { status, renamedFrom, additions, deletions, isBinary };
 }
 
 async function getWholeFileSnapshot(file: string, sandbox: Sandbox): Promise<FileDiff> {
@@ -237,7 +282,9 @@ function renderDiffAsText(diff: FileDiff): string {
 
 /** Resolves a skill by name from `.apm/skills`, or throws listing the valid names. */
 function resolveSkill(skill: string | undefined): { skill: string; body: string } | undefined {
-  if (!skill) return undefined;
+  if (!skill) {
+    return undefined;
+  }
   const skills = loadApmSkills();
   const found = skills.find((s) => s.name === skill);
   if (!found) {
@@ -260,7 +307,10 @@ function parsePrUrl(url: string): { owner: string; repo: string; number: number 
     throw new Error(`"${url}" doesn't look like a GitHub PR URL (expected .../<owner>/<repo>/pull/<number>).`);
   }
   const [, owner, repo, numberStr] = match;
-  return { owner: owner!, repo: repo!, number: Number(numberStr) };
+  if (owner === undefined || repo === undefined || numberStr === undefined) {
+    throw new Error(`Internal error: PR_URL_PATTERN matched "${url}" without all three capture groups.`);
+  }
+  return { owner, repo, number: Number(numberStr) };
 }
 
 interface GhIssueComment {
@@ -284,6 +334,17 @@ async function ghApi<T>(path: string): Promise<T> {
   }
   return JSON.parse(stdout) as T;
 }
+
+const ghPrViewSchema = z.object({
+  title: z.string(),
+  body: z.string().nullable(),
+  author: z.object({ login: z.string() }),
+  url: z.string(),
+  baseRefName: z.string(),
+  headRefName: z.string(),
+});
+
+type GhPrView = z.infer<typeof ghPrViewSchema>;
 
 function renderComments(title: string, comments: { author: string; body: string; location?: string }[]): string {
   if (comments.length === 0) return `${title}: none.\n`;
@@ -322,6 +383,169 @@ const reviewContextSchema = z.object({
     ),
 });
 
+type ReviewContextInput =
+  | { mode: "changes"; skill?: string }
+  | { mode: "commit"; commit: string; skill?: string }
+  | { mode: "pr"; prUrl: string; skill?: string }
+  | { mode: "branch"; branch: string; baseRef?: string; skill?: string }
+  | { mode: "files"; files: string[]; skill?: string };
+
+function narrowReviewContextInput(input: z.infer<typeof reviewContextSchema>): ReviewContextInput {
+  switch (input.mode) {
+    case "changes":
+      return { mode: "changes", skill: input.skill };
+    case "commit":
+      if (!input.commit) {
+        throw new Error("'commit' is required when mode is 'commit'.");
+      }
+      return { mode: "commit", commit: input.commit, skill: input.skill };
+    case "pr":
+      if (!input.prUrl) {
+        throw new Error("'prUrl' is required when mode is 'pr'.");
+      }
+      return { mode: "pr", prUrl: input.prUrl, skill: input.skill };
+    case "branch":
+      if (!input.branch) {
+        throw new Error("'branch' is required when mode is 'branch'.");
+      }
+      return { mode: "branch", branch: input.branch, baseRef: input.baseRef, skill: input.skill };
+    case "files":
+      if (!input.files || input.files.length === 0) {
+        throw new Error("'files' is required (and non-empty) when mode is 'files'.");
+      }
+      return { mode: "files", files: input.files, skill: input.skill };
+  }
+}
+
+function renderWithSkill(resolvedSkill: ReturnType<typeof resolveSkill>, title: string, body: string): string {
+  const skillSection = resolvedSkill ? `\n# Skill to apply: ${resolvedSkill.skill}\n\n${resolvedSkill.body}\n` : "";
+  return `# ${title}\n\n${body}${skillSection}`;
+}
+
+async function handleChangesMode(sandbox: Sandbox, resolvedSkill: ReturnType<typeof resolveSkill>): Promise<string> {
+  const rangeArgs = ["HEAD"];
+  const changedFiles = await discoverChangedFiles(rangeArgs, sandbox.root, true);
+  if (changedFiles.length === 0) {
+    return "No uncommitted changes found.";
+  }
+  const diffs = await Promise.all(
+    changedFiles.map((file) => getFileDiff(file, rangeArgs, sandbox, { treatUntrackedAsAdded: true }))
+  );
+  const body = diffs.map(renderDiffAsText).join("\n");
+  return renderWithSkill(resolvedSkill, `Uncommitted changes (${changedFiles.length} file(s))`, body);
+}
+
+async function handleCommitMode(
+  commit: string,
+  sandbox: Sandbox,
+  resolvedSkill: ReturnType<typeof resolveSkill>
+): Promise<string> {
+  const msg = await runGit(["log", "-1", "--pretty=format:%H%n%an <%ae>%n%ad%n%n%s%n%n%b", commit], sandbox.root);
+  if (msg.exitCode !== 0) {
+    return `Error: could not read commit ${commit}: ${msg.stderr.trim() || `exit code ${msg.exitCode}`}`;
+  }
+  const rangeArgs = [`${commit}^..${commit}`];
+  const changedFiles = await discoverChangedFiles(rangeArgs, sandbox.root, false);
+  if (changedFiles.length === 0) {
+    return `Commit ${commit} has no file changes.`;
+  }
+  const diffs = await Promise.all(
+    changedFiles.map((file) => getFileDiff(file, rangeArgs, sandbox, { treatUntrackedAsAdded: false }))
+  );
+  const body = `Commit message:\n\n${msg.stdout.trim()}\n\n${diffs.map(renderDiffAsText).join("\n")}`;
+  return renderWithSkill(resolvedSkill, `Commit ${commit} (${changedFiles.length} file(s))`, body);
+}
+
+async function handleBranchMode(
+  branch: string,
+  baseRef: string | undefined,
+  sandbox: Sandbox,
+  resolvedSkill: ReturnType<typeof resolveSkill>
+): Promise<string> {
+  const base = baseRef ?? "main";
+  const rangeArgs = [`${base}...${branch}`];
+  const changedFiles = await discoverChangedFiles(rangeArgs, sandbox.root, false);
+  if (changedFiles.length === 0) {
+    return `No changes between ${base} and ${branch}.`;
+  }
+  const diffs = await Promise.all(
+    changedFiles.map((file) => getFileDiff(file, rangeArgs, sandbox, { treatUntrackedAsAdded: false }))
+  );
+  const log = await runGit(["log", "--pretty=format:- %h %s (%an)", `${base}..${branch}`], sandbox.root);
+  if (log.exitCode !== 0) {
+    return `Error: could not list commits between ${base} and ${branch}: ${log.stderr.trim() || `exit code ${log.exitCode}`}`;
+  }
+  const body =
+    `Commits in ${branch} not in ${base}:\n\n${log.stdout.trim() || "(none)"}\n\n` +
+    `${diffs.map(renderDiffAsText).join("\n")}`;
+  return renderWithSkill(resolvedSkill, `Branch ${branch} vs ${base} (${changedFiles.length} file(s))`, body);
+}
+
+async function handleFilesMode(
+  files: string[],
+  sandbox: Sandbox,
+  resolvedSkill: ReturnType<typeof resolveSkill>
+): Promise<string> {
+  const diffs = await Promise.all(files.map((file) => getWholeFileSnapshot(file, sandbox)));
+  const body = diffs.map(renderDiffAsText).join("\n");
+  return renderWithSkill(resolvedSkill, `Files (${files.length})`, body);
+}
+
+async function handlePrMode(prUrl: string, resolvedSkill: ReturnType<typeof resolveSkill>): Promise<string> {
+  const { owner, repo, number } = parsePrUrl(prUrl);
+  const repoSlug = `${owner}/${repo}`;
+
+  const [diffResult, viewResult] = await Promise.all([
+    runGh(["pr", "diff", prUrl]),
+    runGh(["pr", "view", prUrl, "--json", "title,body,author,url,baseRefName,headRefName"]),
+  ]);
+  if (diffResult.exitCode !== 0) {
+    return `Error: gh pr diff failed: ${diffResult.stderr.trim() || `exit code ${diffResult.exitCode}`}. Is 'gh' installed and authenticated?`;
+  }
+
+  let pr: GhPrView;
+  try {
+    if (viewResult.exitCode !== 0) {
+      throw new Error(viewResult.stderr.trim() || `exit code ${viewResult.exitCode}`);
+    }
+    pr = ghPrViewSchema.parse(JSON.parse(viewResult.stdout));
+  } catch (err) {
+    return `Error: gh pr view failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  let issueComments: GhIssueComment[] = [];
+  let reviewComments: GhReviewComment[] = [];
+  try {
+    [issueComments, reviewComments] = await Promise.all([
+      ghApi<GhIssueComment[]>(`repos/${repoSlug}/issues/${number}/comments`),
+      ghApi<GhReviewComment[]>(`repos/${repoSlug}/pulls/${number}/comments`),
+    ]);
+  } catch (err) {
+    return `Error: could not fetch PR comments: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  const conversationSection = renderComments(
+    "Conversation comments",
+    issueComments.map((c) => ({ author: c.user?.login ?? "unknown", body: c.body ?? "" }))
+  );
+  const reviewSection = renderComments(
+    "Inline review comments",
+    reviewComments.map((c) => ({
+      author: c.user?.login ?? "unknown",
+      body: c.body ?? "",
+      location: c.path ? `${c.path}${c.line ? `:${c.line}` : ""}` : undefined,
+    }))
+  );
+
+  const body =
+    `**${pr.title}** by @${pr.author.login} — ${pr.headRefName} -> ${pr.baseRefName}\n${pr.url}\n\n` +
+    `Description:\n\n${pr.body?.trim() || "(no description)"}\n\n` +
+    `${conversationSection}\n${reviewSection}\n` +
+    `Diff:\n\n${diffResult.stdout}`;
+
+  return renderWithSkill(resolvedSkill, `PR ${repoSlug}#${number}`, body);
+}
+
 export const reviewContextTool: ToolDefinition<typeof reviewContextSchema> = {
   name: "review_context",
   description:
@@ -331,121 +555,22 @@ export const reviewContextTool: ToolDefinition<typeof reviewContextSchema> = {
     "content of an explicit file list). Optionally pass 'skill' (see get_context({ symbol: 'skills' })) " +
     "to append that skill's full instructions to apply while reviewing.",
   inputSchema: reviewContextSchema,
-  handler: async ({ mode, commit, prUrl, branch, baseRef, files, skill }, sandbox) => {
-    const resolvedSkill = resolveSkill(skill);
+  handler: async (rawInput, sandbox) => {
+    const input: ReviewContextInput = narrowReviewContextInput(rawInput);
+    const resolvedSkill = resolveSkill(input.skill);
 
-    const renderWithSkill = (title: string, body: string): string => {
-      const skillSection = resolvedSkill
-        ? `\n# Skill to apply: ${resolvedSkill.skill}\n\n${resolvedSkill.body}\n`
-        : "";
-      return `# ${title}\n\n${body}${skillSection}`;
-    };
-
-    if (mode === "changes") {
-      const rangeArgs = ["HEAD"];
-      const changedFiles = await discoverChangedFiles(rangeArgs, sandbox.root, true);
-      if (changedFiles.length === 0) return "No uncommitted changes found.";
-      const diffs = await Promise.all(
-        changedFiles.map((file) => getFileDiff(file, rangeArgs, sandbox, { treatUntrackedAsAdded: true }))
-      );
-      const body = diffs.map(renderDiffAsText).join("\n");
-      return renderWithSkill(`Uncommitted changes (${changedFiles.length} file(s))`, body);
+    switch (input.mode) {
+      case "changes":
+        return handleChangesMode(sandbox, resolvedSkill);
+      case "commit":
+        return handleCommitMode(input.commit, sandbox, resolvedSkill);
+      case "branch":
+        return handleBranchMode(input.branch, input.baseRef, sandbox, resolvedSkill);
+      case "files":
+        return handleFilesMode(input.files, sandbox, resolvedSkill);
+      case "pr":
+        return handlePrMode(input.prUrl, resolvedSkill);
     }
-
-    if (mode === "commit") {
-      if (!commit) return "Error: 'commit' is required when mode is 'commit'.";
-      const msg = await runGit(["log", "-1", "--pretty=format:%H%n%an <%ae>%n%ad%n%n%s%n%n%b", commit], sandbox.root);
-      if (msg.exitCode !== 0) {
-        return `Error: could not read commit ${commit}: ${msg.stderr.trim() || `exit code ${msg.exitCode}`}`;
-      }
-      const rangeArgs = [`${commit}^..${commit}`];
-      const changedFiles = await discoverChangedFiles(rangeArgs, sandbox.root, false);
-      if (changedFiles.length === 0) return `Commit ${commit} has no file changes.`;
-      const diffs = await Promise.all(
-        changedFiles.map((file) => getFileDiff(file, rangeArgs, sandbox, { treatUntrackedAsAdded: false }))
-      );
-      const body = `Commit message:\n\n${msg.stdout.trim()}\n\n${diffs.map(renderDiffAsText).join("\n")}`;
-      return renderWithSkill(`Commit ${commit} (${changedFiles.length} file(s))`, body);
-    }
-
-    if (mode === "branch") {
-      if (!branch) return "Error: 'branch' is required when mode is 'branch'.";
-      const base = baseRef ?? "main";
-      const rangeArgs = [`${base}...${branch}`];
-      const changedFiles = await discoverChangedFiles(rangeArgs, sandbox.root, false);
-      if (changedFiles.length === 0) return `No changes between ${base} and ${branch}.`;
-      const diffs = await Promise.all(
-        changedFiles.map((file) => getFileDiff(file, rangeArgs, sandbox, { treatUntrackedAsAdded: false }))
-      );
-      const log = await runGit(["log", "--pretty=format:- %h %s (%an)", `${base}..${branch}`], sandbox.root);
-      if (log.exitCode !== 0) {
-        return `Error: could not list commits between ${base} and ${branch}: ${log.stderr.trim() || `exit code ${log.exitCode}`}`;
-      }
-      const body =
-        `Commits in ${branch} not in ${base}:\n\n${log.stdout.trim() || "(none)"}\n\n` +
-        `${diffs.map(renderDiffAsText).join("\n")}`;
-      return renderWithSkill(`Branch ${branch} vs ${base} (${changedFiles.length} file(s))`, body);
-    }
-
-    if (mode === "files") {
-      if (!files || files.length === 0) return "Error: 'files' is required (and non-empty) when mode is 'files'.";
-      const diffs = await Promise.all(files.map((file) => getWholeFileSnapshot(file, sandbox)));
-      const body = diffs.map(renderDiffAsText).join("\n");
-      return renderWithSkill(`Files (${files.length})`, body);
-    }
-
-    // mode === "pr"
-    if (!prUrl) return "Error: 'prUrl' is required when mode is 'pr'.";
-    const { owner, repo, number } = parsePrUrl(prUrl);
-    const repoSlug = `${owner}/${repo}`;
-
-    const diffResult = await runGh(["pr", "diff", prUrl]);
-    if (diffResult.exitCode !== 0) {
-      return `Error: gh pr diff failed: ${diffResult.stderr.trim() || `exit code ${diffResult.exitCode}`}. Is 'gh' installed and authenticated?`;
-    }
-
-    let pr: { title: string; body: string; author: { login: string }; url: string; baseRefName: string; headRefName: string };
-    try {
-      const view = await runGh(["pr", "view", prUrl, "--json", "title,body,author,url,baseRefName,headRefName"]);
-      if (view.exitCode !== 0) {
-        throw new Error(view.stderr.trim() || `exit code ${view.exitCode}`);
-      }
-      pr = JSON.parse(view.stdout);
-    } catch (err) {
-      return `Error: gh pr view failed: ${err instanceof Error ? err.message : String(err)}`;
-    }
-
-    let issueComments: GhIssueComment[] = [];
-    let reviewComments: GhReviewComment[] = [];
-    try {
-      [issueComments, reviewComments] = await Promise.all([
-        ghApi<GhIssueComment[]>(`repos/${repoSlug}/issues/${number}/comments`),
-        ghApi<GhReviewComment[]>(`repos/${repoSlug}/pulls/${number}/comments`),
-      ]);
-    } catch (err) {
-      return `Error: could not fetch PR comments: ${err instanceof Error ? err.message : String(err)}`;
-    }
-
-    const conversationSection = renderComments(
-      "Conversation comments",
-      issueComments.map((c) => ({ author: c.user?.login ?? "unknown", body: c.body ?? "" }))
-    );
-    const reviewSection = renderComments(
-      "Inline review comments",
-      reviewComments.map((c) => ({
-        author: c.user?.login ?? "unknown",
-        body: c.body ?? "",
-        location: c.path ? `${c.path}${c.line ? `:${c.line}` : ""}` : undefined,
-      }))
-    );
-
-    const body =
-      `**${pr.title}** by @${pr.author.login} — ${pr.headRefName} -> ${pr.baseRefName}\n${pr.url}\n\n` +
-      `Description:\n\n${pr.body?.trim() || "(no description)"}\n\n` +
-      `${conversationSection}\n${reviewSection}\n` +
-      `Diff:\n\n${diffResult.stdout}`;
-
-    return renderWithSkill(`PR ${repoSlug}#${number}`, body);
   },
 };
 
