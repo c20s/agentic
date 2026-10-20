@@ -168,4 +168,8 @@ MIT — see [LICENSE](LICENSE).
 
 ## Upcoming features
 
-- [ ] Skills tool, depending on what file is read, get a set of available skils for that file for the agent to use, also a tool to get get a tree of skill references that is really small from the start like, review, edit, research, that drills down to more specific skills depending on the task
+- [x] `get_context` tool on the local MCP server (no args) returning a default, AGENTS.md-style response
+      guideline. See `apps/local-mcp-server/src/context.ts`.
+- [ ] Extend `get_context` with scripted `symbol` lookups (e.g. `review`, `get_project_overview`) — small,
+      on-demand summaries of file structure / important files, and a short description of available
+      skills + when to use them, drilling down into more specific skills depending on the task.

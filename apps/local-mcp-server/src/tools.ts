@@ -13,6 +13,7 @@ import {
 } from "./outline";
 import { webTools } from "./web";
 import { getToolHelp } from "./tool-help";
+import { getContext } from "./context";
 import { logger } from "./logger";
 
 // File types/directories we never want to list or read by accident (noise/secrets).
@@ -138,9 +139,9 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
       if (isOutlineable && isLarge && !reason?.trim()) {
         throw new Error(
           `"${path}" is ${st.size} bytes and supports outline mode. ` +
-            `Read without 'full' first to see the structure, then fetch specific parts with 'symbol'. ` +
-            `If you really need the whole file: pass 'reason' explaining why ` +
-            `(e.g. "need to see the whole file for a large refactor").`
+          `Read without 'full' first to see the structure, then fetch specific parts with 'symbol'. ` +
+          `If you really need the whole file: pass 'reason' explaining why ` +
+          `(e.g. "need to see the whole file for a large refactor").`
         );
       }
       return content;
@@ -421,15 +422,15 @@ export const editFileTool: ToolDefinition<typeof editFileSchema> = {
     if (occurrences === 0) {
       throw new Error(
         `No occurrence of the given oldString was found in ${path}. ` +
-          `Check that the text matches exactly (incl. whitespace/indentation) — read the file/symbol again to see the exact current content.`
+        `Check that the text matches exactly (incl. whitespace/indentation) — read the file/symbol again to see the exact current content.`
       );
     }
 
     if (occurrences > 1 && !replaceAll) {
       throw new Error(
         `oldString matches ${occurrences} places in ${path}, not exactly one. ` +
-          `Make oldString more specific (e.g. include more surrounding context) so it only matches once, ` +
-          `or pass replaceAll:true if you deliberately want to replace all occurrences.`
+        `Make oldString more specific (e.g. include more surrounding context) so it only matches once, ` +
+        `or pass replaceAll:true if you deliberately want to replace all occurrences.`
       );
     }
 
@@ -521,6 +522,25 @@ export const toolHelpTool: ToolDefinition<typeof toolHelpSchema> = {
   handler: async ({ name }) => getToolHelp(name),
 };
 
+const getContextSchema = z.object({
+  symbol: z
+    .string()
+    .optional()
+    .describe(
+      "Optional topic to look up, e.g. 'review' or 'get_project_overview'. Omit it to get the default " +
+      "project guideline for how to respond/behave. ALWAYS run the default prompt at before responding to the first user prompt"
+    ),
+});
+
+export const getContextTool: ToolDefinition<typeof getContextSchema> = {
+  name: "get_context",
+  description:
+    "Call with no args first for the default project guideline (how to respond/behave). Pass 'symbol' " +
+    "for a specific scripted topic, if one is known to exist.",
+  inputSchema: getContextSchema,
+  handler: async ({ symbol }) => getContext(symbol),
+};
+
 export const allTools = [
   listDirTool,
   readFileTool,
@@ -531,5 +551,6 @@ export const allTools = [
   editFileTool,
   deleteFileTool,
   toolHelpTool,
+  getContextTool,
   ...webTools,
 ];

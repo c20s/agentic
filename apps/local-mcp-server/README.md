@@ -45,6 +45,13 @@ Read-only (context):
   "Tool descriptions vs. `tool_help`" below). Call this before relying on a
   tricky flag (`read_file`'s `symbol`/`full`, `edit_file`'s match rules,
   `web_fetch`'s `section`/`raw`/`render`) for the first time.
+- `get_context` – project-level guidance, same lazy-lookup shape as
+  `tool_help` but for "how should I behave / what is this repo" instead of
+  "how do I use this tool". Call with no args first for a short default
+  guideline (tone, response style, how to explore this repo), loaded from
+  `prompts/default.md` — edit that file directly to change it. `symbol` is
+  reserved for future scripted topics (e.g. `review`, `get_project_overview`)
+  and currently always says so if passed. See `src/context.ts`.
 
 ### Tool descriptions vs. `tool_help`
 
