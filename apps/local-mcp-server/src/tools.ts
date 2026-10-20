@@ -12,6 +12,7 @@ import {
   extractYamlValueAtPath,
 } from "./outline";
 import { webTools } from "./web";
+import { ghReviewListTool } from "./gh-review-list";
 import { getToolHelp } from "./tool-help";
 import { getContext } from "./context";
 import { logger } from "./logger";
@@ -552,5 +553,6 @@ export const allTools = [
   deleteFileTool,
   toolHelpTool,
   getContextTool,
+  ghReviewListTool,
   ...webTools,
 ];

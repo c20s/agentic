@@ -41,6 +41,14 @@ Read-only (context):
 - `web_search` – search the web (backed by DuckDuckGo's no-JS HTML results
   page, so no API key is needed) and return a list of `{ title, url,
   snippet }` results. Pair with `web_fetch` to read a specific result.
+- `gh_review_list` – lists open GitHub PRs needing attention: yours (assigned
+  + review-requested) and your team's, enriched with review/comment status
+  and priority. Shells out to the `gh` CLI (must be installed & authenticated)
+  via the `gh-review-list` workspace package, results cached on disk per
+  `~/.config/c20s/prs.json`'s `cacheTtlSeconds`. `refresh: true` forces a
+  re-fetch, `json: true` returns structured data instead of the rendered
+  table. Also available standalone as `pnpm run prs` — see
+  `apps/gh-review-list/README.md`.
 - `tool_help` – fetch the full usage guide for one other tool by name (see
   "Tool descriptions vs. `tool_help`" below). Call this before relying on a
   tricky flag (`read_file`'s `symbol`/`full`, `edit_file`'s match rules,

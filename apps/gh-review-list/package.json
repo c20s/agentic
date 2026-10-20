@@ -1,0 +1,27 @@
+{
+  "name": "gh-review-list",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "pnpm": ">=12"
+  },
+  "module": "src/index.ts",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "gh-review-list": "./src/cli.ts"
+  },
+  "scripts": {
+    "prs": "bun run src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.3",
+    "bun-types": "1.4.3",
+    "typescript": "5.9.3"
+  }
+}
