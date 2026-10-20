@@ -7,6 +7,9 @@
     "pnpm": ">=12"
   },
   "scripts": {
+    "audit": "pnpm audit",
+    "audit:fix": "pnpm audit --fix",
+    "audit:high": "pnpm audit --audit-level=high",
     "logs:tail": "tail -f ~/.claude/mcp-local-fs.summary.log",
     "logs:tail:detail": "tail -f ~/.claude/mcp-local-fs.log",
     "logs:tail:all": "tail -f ~/.claude/mcp-local-fs.summary.log ~/.claude/mcp-local-fs.log",

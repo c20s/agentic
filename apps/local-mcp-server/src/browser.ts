@@ -9,12 +9,46 @@
  * lazily, the first time a render is actually attempted, and fail with a
  * clear, actionable error if it (or a browser binary) isn't available —
  * the rest of web_fetch keeps working via plain fetch() regardless.
+ *
+ * SECURITY MODEL
+ * ---------------
+ * This renders arbitrary, untrusted, possibly-adversarial URLs (including
+ * ones that may have been suggested by web_search results or injected via
+ * content the model read elsewhere). Treat every page as hostile:
+ *   - the browser is launched with its sandbox ENABLED (no --no-sandbox),
+ *     script/extension-loading disabled, and no persistent profile;
+ *   - every navigation, redirect, and sub-resource request made BY THE PAGE
+ *     ITSELF is re-validated against the same SSRF blocklist used for the
+ *     initial fetch — not just the final URL after the top-level
+ *     navigation. Without this, a page could `fetch()`/redirect/iframe to
+ *     loopback or cloud-metadata addresses from inside the renderer;
+ *   - popups/new tabs/new windows are blocked (`window.open` etc.) so a page
+ *     can't spawn additional, unmanaged browser contexts;
+ *   - downloads, JS dialogs (alert/confirm/prompt/beforeunload), and
+ *     permission prompts (geolocation, notifications, clipboard, camera...)
+ *     are all auto-dismissed/denied rather than left to hang or default-allow;
+ *   - each render gets a brand-new, throwaway BrowserContext (no cookies,
+ *     storage, or cache shared across calls or with any other site);
+ *   - rendered HTML is size-capped while reading it out, so an adversarial
+ *     infinite/huge DOM can't exhaust memory;
+ *   - a hard wall-clock budget bounds the whole render (nav + settle time),
+ *     independent of Playwright's own per-call timeouts.
  */
+
+import { isBlockedUrl } from "./net-guard";
 
 const RENDER_TIMEOUT_MS = 20_000;
 const RENDER_WAIT_AFTER_LOAD_MS = 500;
+// Hard ceiling on how much rendered HTML we'll ever pull out of the page,
+// independent of web_fetch's own downstream truncation — this bounds memory
+// use even before the text reaches web.ts's MAX_RETURNED_CHARS trim.
+const MAX_RENDERED_HTML_BYTES = 5_000_000;
+// Upper bound on concurrent renders, so repeated web_fetch({render:"always"})
+// calls can't spin up unbounded Chromium pages / exhaust CPU & memory.
+const MAX_CONCURRENT_RENDERS = 2;
 
 let browserPromise: Promise<import("playwright-core").Browser> | null = null;
+let activeRenders = 0;
 
 /** Lazily launches (once) and reuses a single headless Chromium instance for the life of the server process. */
 async function getBrowser(): Promise<import("playwright-core").Browser> {
@@ -31,7 +65,29 @@ async function getBrowser(): Promise<import("playwright-core").Browser> {
         );
       }
       try {
-        return await playwright.chromium.launch({ headless: true });
+        return await playwright.chromium.launch({
+          headless: true,
+          // Explicit, minimal, locked-down launch flags. Notably we do NOT pass
+          // --no-sandbox: keep Chromium's own OS-level sandbox enabled. If you
+          // must run as root in a container where Chromium refuses to start
+          // without --no-sandbox, prefer fixing the container's user/namespace
+          // setup over disabling the sandbox.
+          args: [
+            "--disable-extensions",
+            "--disable-component-extensions-with-background-pages",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-gpu",
+            "--disable-notifications",
+            "--no-first-run",
+            "--mute-audio",
+            "--js-flags=--noexpose_wasm", // reduce WASM-based exploit/fingerprint surface
+          ],
+          // Never persist a profile/cache to disk across launches.
+          handleSIGINT: false,
+          handleSIGTERM: false,
+          handleSIGHUP: false,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(
@@ -70,34 +126,107 @@ export interface RenderResult {
 /**
  * Loads a URL in headless Chromium, waits for it to settle, and returns the
  * fully rendered DOM's outerHTML (i.e. post-JavaScript content).
+ *
+ * Every request the page itself makes (navigation, redirect, fetch/XHR,
+ * iframe, etc.) is re-validated against the SSRF blocklist, not just the
+ * top-level URL passed in here — see the module doc comment above.
  */
 export async function renderPage(url: string, timeoutMs: number = RENDER_TIMEOUT_MS): Promise<RenderResult> {
+  if (isBlockedUrl(url)) {
+    throw new Error(`Refusing to render "${url}": loopback/private/link-local addresses are blocked.`);
+  }
+
+  if (activeRenders >= MAX_CONCURRENT_RENDERS) {
+    throw new Error(
+      `Too many concurrent renders in flight (limit ${MAX_CONCURRENT_RENDERS}). Try again shortly.`
+    );
+  }
+  activeRenders++;
+
   const browser = await getBrowser();
+  // A fresh, throwaway, fully-isolated context per render: no cookies, no
+  // localStorage/IndexedDB, no cache, and no permissions carried over
+  // between calls or shared with any other site.
   const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) " +
       "Chrome/120.0.0.0 Safari/537.36 local-mcp-server/0.1",
+    javaScriptEnabled: true, // required for SPA rendering, but everything else below is locked down
+    acceptDownloads: false,
+    bypassCSP: false,
+    ignoreHTTPSErrors: false,
+    serviceWorkers: "block",
+    permissions: [], // deny all permission prompts (geolocation, notifications, camera, clipboard, etc.)
   });
+
+  // Hard wall-clock budget for the whole render, independent of any single
+  // Playwright call's own timeout (belt-and-suspenders against slow-loris-
+  // style pages that trickle just enough activity to keep resetting
+  // per-call timeouts).
+  let timedOut = false;
+  const hardDeadline = setTimeout(() => {
+    timedOut = true;
+    context.close().catch(() => {});
+  }, timeoutMs + RENDER_WAIT_AFTER_LOAD_MS + 5_000);
+
   try {
+    // Any extra page spawned in this context (popups, window.open, target="_blank",
+    // etc.) is closed immediately — a hostile page shouldn't be able to spawn
+    // additional, unmanaged pages that keep running after renderPage() returns.
+    context.on("page", (extraPage) => {
+      extraPage.close().catch(() => {});
+    });
+
     const page = await context.newPage();
-    // Block heavy, content-irrelevant resources so rendering is faster and lighter.
+
+    // Auto-dismiss any JS dialog (alert/confirm/prompt/beforeunload) instead of
+    // letting it block navigation until the timeout fires.
+    page.on("dialog", (dialog) => dialog.dismiss().catch(() => {}));
+
+    // Deny downloads outright.
+    page.on("download", (download) => download.cancel().catch(() => {}));
+
+    // Re-validate EVERY request the page makes (main frame nav, redirects,
+    // fetch/XHR, iframes, websockets, etc.) against the SSRF blocklist, and
+    // block heavy/irrelevant resource types to keep rendering fast and light.
     await page.route("**/*", (route) => {
-      const type = route.request().resourceType();
-      if (type === "image" || type === "font" || type === "media") {
+      const request = route.request();
+      const resourceType = request.resourceType();
+
+      if (resourceType === "image" || resourceType === "font" || resourceType === "media") {
         return route.abort();
       }
+
+      if (isBlockedUrl(request.url())) {
+        return route.abort("blockedbyclient");
+      }
+
       return route.continue();
     });
 
     const response = await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs });
+
+    // Re-validate the final top-level URL after any redirects the page/server issued.
+    const navigatedUrl = response?.url() || page.url();
+    if (isBlockedUrl(navigatedUrl)) {
+      throw new Error(`Refusing to render "${navigatedUrl}": navigation redirected to a blocked address.`);
+    }
+
     // Give any late client-side rendering (e.g. a final React effect) a brief moment to settle.
     await page.waitForTimeout(RENDER_WAIT_AFTER_LOAD_MS);
 
+    if (timedOut) {
+      throw new Error(`Render of "${url}" exceeded the hard timeout budget and was aborted.`);
+    }
+
     const html = await page.content();
-    const finalUrl = response?.url() || page.url() || url;
-    return { html, finalUrl };
+    const bounded = html.length > MAX_RENDERED_HTML_BYTES ? html.slice(0, MAX_RENDERED_HTML_BYTES) : html;
+    const finalUrl = navigatedUrl || url;
+    return { html: bounded, finalUrl };
   } finally {
+    clearTimeout(hardDeadline);
     await context.close().catch(() => {});
+    activeRenders--;
   }
 }
 

@@ -199,11 +199,38 @@ failure as an error, since rendering was explicitly requested.
 
 A single headless Chromium instance is launched lazily on first use and
 reused for the life of the server process (not relaunched per request), and
-closed automatically on server shutdown (`SIGINT`/`SIGTERM`). Each `web_fetch`
-render runs in its own isolated browser context (so no cookies/state leak
-between calls), with image/font/media requests blocked to keep rendering
-fast and light, and the same timeout/size caps as the rest of `web_fetch`
-apply to rendered pages too.
+closed automatically on server shutdown (`SIGINT`/`SIGTERM`). Rendering is
+treated as executing fully untrusted, potentially hostile code, with several
+layers of hardening (see `src/browser.ts`):
+
+- **Sandboxed launch**: Chromium's own OS sandbox is kept enabled (no
+  `--no-sandbox`), plus extensions, background networking, default apps, and
+  notifications are explicitly disabled at launch.
+- **Per-render isolation**: every render gets a brand-new, throwaway
+  `BrowserContext` — no cookies, `localStorage`/IndexedDB, cache, or
+  permissions are shared across calls or between different sites. Service
+  workers are blocked outright and all permission prompts (geolocation,
+  notifications, camera, clipboard, etc.) are denied by default.
+- **SSRF protection on every request the page makes**, not just the URL you
+  asked for: the same loopback/private/link-local blocklist used for the
+  initial static `fetch()` (see `src/net-guard.ts`) is re-applied to *every*
+  request the rendered page itself issues — redirects, `fetch`/XHR, iframes,
+  sub-resources — so a hostile page can't pivot to internal services or the
+  cloud metadata endpoint from inside the renderer. The final navigated URL
+  is also re-checked after the page settles.
+- **No popups, downloads, or dialogs**: any extra tab/window a page tries to
+  open (`window.open`, `target="_blank"`, etc.) is immediately closed,
+  downloads are cancelled outright, and JS dialogs (`alert`/`confirm`/
+  `prompt`/`beforeunload`) are auto-dismissed instead of being left to hang.
+- **Resource limits**: image/font/media requests are blocked (faster,
+  lighter rendering), rendered HTML is capped at 5 MB before it's handed back
+  (on top of `web_fetch`'s own ~50,000-char response cap), concurrent
+  renders are capped (default 2 in flight) to bound CPU/memory use, and a
+  hard wall-clock deadline bounds the whole render independent of
+  Playwright's own per-call timeouts.
+
+The same timeout/size caps as the rest of `web_fetch` apply to rendered
+pages too.
 
 ### Why both `edit_file` and `write_file`?
 
@@ -519,11 +546,15 @@ blocked explicitly with `--disallowedTools`.
   may need updating if DuckDuckGo changes that page's markup.
 - `web_fetch`'s optional headless-browser rendering (`playwright-core`) is a
   meaningfully larger attack/resource surface than a plain `fetch()` — it
-  executes arbitrary third-party JavaScript. The same SSRF host checks are
-  re-applied to the browser's final URL after any client-side
-  navigation/redirect, each render uses a fresh, isolated browser context
-  (no shared cookies/storage across calls), and image/font/media requests
-  are blocked. It's still a real browser engine, though, so only enable
-  rendering (`bunx playwright install chromium`) if you're comfortable with
-  that trade-off; `render: "never"` disables it per-call, and simply not
-  installing `playwright-core` disables it server-wide.
+  executes arbitrary third-party JavaScript. It's hardened accordingly (see
+  the "Rendering single-page apps" section above for the full list): the
+  OS-level Chromium sandbox stays enabled, every request the rendered page
+  makes (not just the final URL) is re-checked against the SSRF blocklist,
+  each render uses a fresh, fully isolated browser context (no shared
+  cookies/storage/service-workers/permissions across calls), popups/
+  downloads/JS dialogs are blocked or auto-dismissed, and both render
+  concurrency and rendered-HTML size are capped. It's still a real browser
+  engine executing untrusted JS, though, so only enable rendering (`bunx
+  playwright install chromium`) if you're comfortable with that trade-off;
+  `render: "never"` disables it per-call, and simply not installing
+  `playwright-core` disables it server-wide.

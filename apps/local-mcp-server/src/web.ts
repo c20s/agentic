@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ToolDefinition } from "./tools";
 import { extractMarkdownOutline, formatMarkdownOutline, extractMarkdownSection } from "./outline";
 import { renderPage, looksLikeUnrenderedSpa } from "./browser";
+import { assertSafeUrl } from "./net-guard";
 
 /**
  * Network tools: web_fetch / web_search.
@@ -21,56 +22,6 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_FETCH_BYTES = 1_000_000;
 const MAX_RETURNED_CHARS = 50_000;
 const USER_AGENT = "local-mcp-server/0.1 (+https://github.com)";
-
-/**
- * Hostnames/IP ranges that must never be reachable via web_fetch/web_search,
- * so a malicious or injected URL can't be used to probe the local machine
- * or internal network (SSRF).
- */
-function isBlockedHostname(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  if (h === "localhost" || h.endsWith(".localhost")) return true;
-  if (h === "0.0.0.0" || h === "::1" || h === "[::1]") return true;
-
-  // IPv4 literal checks: loopback, private ranges, link-local, metadata endpoint.
-  const ipv4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
-    if (a === 127) return true; // loopback
-    if (a === 10) return true; // private
-    if (a === 172 && b >= 16 && b <= 31) return true; // private
-    if (a === 192 && b === 168) return true; // private
-    if (a === 169 && b === 254) return true; // link-local / cloud metadata (169.254.169.254)
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    return false;
-  }
-
-  // Bare IPv6 loopback/link-local/unique-local checks (best-effort, no full parser).
-  if (h.includes(":")) {
-    const stripped = h.replace(/^\[|\]$/g, "");
-    if (stripped === "::1") return true;
-    if (stripped.startsWith("fe80:")) return true; // link-local
-    if (stripped.startsWith("fc") || stripped.startsWith("fd")) return true; // unique local
-  }
-
-  return false;
-}
-
-function assertSafeUrl(raw: string): URL {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error(`"${raw}" is not a valid URL.`);
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`Unsupported protocol "${url.protocol}". Only http:// and https:// are allowed.`);
-  }
-  if (isBlockedHostname(url.hostname)) {
-    throw new Error(`Refusing to fetch "${url.hostname}": loopback/private/link-local addresses are blocked.`);
-  }
-  return url;
-}
 
 /** Strips tags/scripts/styles and collapses whitespace, producing plain readable text from HTML. */
 function htmlToText(html: string): string {
