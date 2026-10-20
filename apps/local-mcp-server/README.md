@@ -91,9 +91,12 @@ everything at the top level of the file.
 
 Two ways to get more:
 
-- **`symbol: "<name/path/heading>"`** – fetch just a specific part:
-  - `.md`: matches heading text (substring, case-insensitive) → the entire
-    section (up to the next heading at the same or higher level)
+- **`symbol: "<name/path/heading>"`** – fetch just a specific part. In all
+  cases, pass the plain text itself, **without** any leading `#` or other
+  outline markup:
+  - `.md`: matches heading text (substring, case-insensitive, no leading
+    `#`s) → the entire section (up to the next heading at the same or
+    higher level)
   - `.ts`/`.js` etc.: matches a symbol name → the full source code
     **including body**
   - `.json`/`.yaml`/`.yml`: a key path (e.g. `"foo.bar.baz"` or
@@ -141,8 +144,9 @@ from `src/outline.ts` as `read_file` uses for local `.md` files:
   Smaller pages, or pages with no headings at all, are returned in full
   directly since there's nothing meaningful to outline.
 - **`section: "<heading text>"`** – like `read_file`'s `symbol`: matches a
-  heading by substring (case-insensitive) and returns that heading's full
-  content through the next heading of equal-or-higher level.
+  heading by substring (case-insensitive, no leading `#`s — pass the plain
+  heading text) and returns that heading's full content through the next
+  heading of equal-or-higher level.
 - **`full: true`** – skip outline mode, return the entire converted page
   (still subject to the overall size cap below).
 - **`raw: true`** – bypass HTML→markdown conversion, outline mode, and SPA

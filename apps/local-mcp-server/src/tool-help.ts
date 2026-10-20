@@ -23,8 +23,9 @@ export const TOOL_GUIDE: Record<string, string> = {
     "for .ts/.tsx/.js/.jsx all top-level const/function/interface/type/class/enum signatures without body, " +
     "for .json/.yaml/.yml all key paths recursively (e.g. foo.bar.baz, foo.bar, foo). " +
     "Other file types are returned in full as usual.\n\n" +
-    "Pass 'symbol' to fetch one specific part instead of the whole outline: " +
-    "for .md a heading section (matched against heading text, substring/case-insensitive), " +
+    "Pass 'symbol' to fetch one specific part instead of the whole outline — in all cases 'symbol' is the " +
+    "plain text of the part you want, never including any leading '#'s or other outline markup: " +
+    "for .md a heading section (matched against heading text only, no leading '#'s, substring/case-insensitive), " +
     "for .ts/.tsx/.js/.jsx a symbol name (function/const/interface/type/class/enum, full source code incl. body; " +
     "for imports you can match on the module path, a substring of it, or an imported name, e.g. 'create' or 'member.create'), " +
     "for .json/.yaml/.yml a key path (e.g. 'foo.bar.baz' or 'items[0].name').\n\n" +

@@ -222,7 +222,7 @@ const renderModeSchema = z
 const webFetchSchema = z.object({
   url: z.string().describe("Absolute http(s) URL."),
   full: z.boolean().default(false).describe("Full converted page instead of outline. Ignored if raw."),
-  section: z.string().optional().describe("One heading section only (substring match), markdown or raw HTML."),
+  section: z.string().optional().describe("One heading section only (substring match), markdown or raw HTML. Use the heading text itself, without any leading '#'."),
   raw: z.boolean().default(false).describe("Unconverted response body instead of markdown. See tool_help first."),
   render: renderModeSchema,
 });

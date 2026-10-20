@@ -89,14 +89,15 @@ const readFileSchema = z.object({
   path: z.string().describe("Path to the file, relative to sandbox root."),
   full: z.boolean().default(false).describe("Whole file, no outline. >4KB outlineable files need 'reason' too."),
   reason: z.string().optional().describe("Why you need 'full' on a large outlineable file. See tool_help."),
-  symbol: z.string().optional().describe("Fetch one part instead of the full outline: heading/symbol/key-path."),
+  symbol: z.string().optional().describe("Fetch one part instead of the full outline: heading/symbol/key-path. Use the symbol text itself, without any leading '#'."),
 });
 
 export const readFileTool: ToolDefinition<typeof readFileSchema> = {
   name: "read_file",
   description:
     "Read a text file. Read-only. Default: compact OUTLINE (md headings / ts top-level signatures / " +
-    "json+yaml key paths), not the full file. Use 'symbol' for one part, 'full:true' for everything. " +
+    "json+yaml key paths), not the full file. Use 'symbol' (the heading/symbol/key-path text itself, " +
+    "without any leading '#') for one part, 'full:true' for everything. " +
     "Call tool_help('read_file') before relying on 'symbol' or 'full' for the first time.",
   inputSchema: readFileSchema,
   handler: async ({ path, full, reason, symbol }, sandbox) => {
