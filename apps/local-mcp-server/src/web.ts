@@ -105,6 +105,47 @@ function extractTitle(html: string): string | null {
   return match ? htmlToText(match[1]!).trim() || null : null;
 }
 
+interface RawHtmlHeading {
+  level: number;
+  text: string;
+  start: number; // char index in the raw html where this <hN> tag starts
+}
+
+/**
+ * Scans raw HTML for <h1>-<h6> tags (in document order) and returns their nesting level,
+ * visible text, and byte offset. Used to slice out a "section" of raw HTML without ever
+ * converting the page to markdown, mirroring extractMarkdownSection's heading-based approach.
+ */
+function extractRawHtmlHeadings(html: string): RawHtmlHeading[] {
+  const headings: RawHtmlHeading[] = [];
+  const re = /<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) {
+    const text = htmlToText(match[2]!).replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    headings.push({ level: Number(match[1]), text, start: match.index });
+  }
+  return headings;
+}
+
+/**
+ * Finds a heading whose text matches headingQuery (substring, case-insensitive) and returns the raw HTML
+ * slice from that heading's opening tag through (but not including) the next heading of equal-or-higher
+ * level, or the end of the document. Returns null if no heading matches.
+ */
+function extractRawHtmlSection(html: string, headingQuery: string): string | null {
+  const headings = extractRawHtmlHeadings(html);
+  const needle = headingQuery.toLowerCase();
+  const idx = headings.findIndex((h) => h.text.toLowerCase().includes(needle));
+  if (idx === -1) return null;
+
+  const target = headings[idx]!;
+  const next = headings.slice(idx + 1).find((h) => h.level <= target.level);
+  const end = next ? next.start : html.length;
+
+  return html.slice(target.start, end).trim();
+}
+
 /**
  * Converts HTML into a lightweight markdown-ish representation: headings
  * become "#".."######" lines, links become "[text](href)", and everything
@@ -239,7 +280,8 @@ const webFetchSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      "If true, skip outline mode and return the full converted page content (still capped by the overall size limit). Default false."
+      "If true, skip outline mode and return the full converted page content (still capped by the overall size limit). " +
+        "Ignored when 'raw' is true (raw mode never does markdown conversion, so there's no outline to skip). Default false."
     ),
   section: z
     .string()
@@ -247,14 +289,23 @@ const webFetchSchema = z.object({
     .describe(
       "Fetch just one section of the page instead of the whole thing: matched against a heading's text " +
         "(substring, case-insensitive), returning that heading through the next heading of equal-or-higher level. " +
-        "Use this after seeing the outline, similar to read_file's 'symbol' parameter."
+        "Use this after seeing the outline (call web_fetch({url}) first), similar to read_file's 'symbol' parameter. " +
+        "Works whether or not 'raw' is also set: without 'raw' you get that section in markdown (the normal, " +
+        "cheaper choice); with 'raw: true' you get that section's exact unconverted HTML instead of the whole " +
+        "raw page."
     ),
   raw: z
     .boolean()
     .default(false)
     .describe(
-      "If true, return the raw response body as-is (e.g. for JSON APIs) instead of converting HTML. " +
-        "Takes precedence over 'full'/'section'/rendering. Default false."
+      "Last resort, not a starting point: fetch the outline and/or a 'section' in markdown first, and only set " +
+        "'raw: true' if that's not enough (e.g. you need a table's real structure, tab/accordion boundaries, an " +
+        "element's exact attributes, a JSON/plain-text API body, or the markdown conversion looks wrong). " +
+        "When true, returns the response body as-is instead of converting HTML to markdown, and takes precedence " +
+        "over 'full' and 'render' (no markdown conversion, no SPA rendering happen in raw mode). " +
+        "Combine with 'section' to scope raw mode to one part of an HTML page instead of dumping the whole raw " +
+        "document: it matches an <h1>-<h6> tag by its visible text (substring, case-insensitive) and returns the " +
+        "raw HTML from that heading through the next heading of equal-or-higher level. Default false."
     ),
   render: renderModeSchema,
 });
@@ -312,10 +363,8 @@ export const webFetchTool: ToolDefinition<typeof webFetchSchema> = {
     "Fetch a single URL over http(s). Read-only, GET only (no cookies/auth/state). " +
     "HTML pages are converted to markdown-ish readable text (headings, links as [text](url)), and by default " +
     "only an OUTLINE is returned (page title + all headings with their nesting, like read_file does for local " +
-    ".md files) instead of the full page — this avoids flooding context with a huge page. " +
-    "Pass 'section: \"<heading text>\"' to fetch one specific section's full content, or 'full: true' to get the " +
-    "entire converted page. Pass 'raw: true' to get the body as-is instead (e.g. for JSON endpoints); this skips " +
-    "outline/section/full/rendering handling entirely. " +
+    ".md files) instead of the full page — this avoids flooding context with a huge page. See 'Efficient usage' " +
+    "below for how 'section', 'full', and 'raw' fit together. " +
     "Single-page apps (React/Vue/Angular etc.) that render content with client-side JavaScript are handled " +
     "automatically: by default ('render: \"auto\"') a plain static fetch is tried first, and if the result " +
     "looks like an empty, unrendered SPA shell, a headless Chromium browser (via playwright-core) renders the " +
@@ -324,7 +373,14 @@ export const webFetchTool: ToolDefinition<typeof webFetchSchema> = {
     "that cost when it looks necessary. " +
     "Requests to localhost/private/link-local addresses are blocked. Responses are capped in size " +
     `(~${MAX_FETCH_BYTES} bytes fetched, ~${MAX_RETURNED_CHARS} chars returned) and time out after ${DEFAULT_TIMEOUT_MS}ms. ` +
-    "Typical flow: web_fetch({url}) to see the outline -> web_fetch({url, section: \"...\"}) to read one part.",
+    "Efficient usage, in order: " +
+    "(1) web_fetch({url}) first, to see the outline (headings only) without spending context on the full page; " +
+    "(2) web_fetch({url, section: \"...\"}) to read the one or two sections that look relevant, in markdown; " +
+    "(3) only if you specifically need exact, unconverted markup (e.g. a table's real structure, tab/accordion " +
+    "boundaries, an element's attributes, or markdown conversion looks like it dropped/garbled something) add " +
+    "'raw: true' — optionally still combined with 'section' to keep it scoped to one part instead of the whole " +
+    "raw page. Avoid reaching for 'raw: true' or 'full: true' by default: they cost more context and, for 'raw', " +
+    "lose the readable formatting most tasks don't need.",
   inputSchema: webFetchSchema,
   handler: async ({ url, full, section, raw, render }) => {
     const safeUrl = assertSafeUrl(url);
@@ -353,6 +409,21 @@ export const webFetchTool: ToolDefinition<typeof webFetchSchema> = {
 
     if (raw || !isHtml) {
       const header = formatHeader(safeUrl.toString(), res.status, contentType, false);
+
+      if (raw && isHtml && section) {
+        const found = extractRawHtmlSection(body, section);
+        if (found === null) {
+          const headings = extractRawHtmlHeadings(body);
+          throw new Error(
+            headings.length > 0
+              ? `No heading matching "${section}" was found in the raw HTML. Use web_fetch without 'raw' to see the outline (all headings), or check the heading text and try again.`
+              : `No heading matching "${section}" was found, and the page has no <h1>-<h6> tags at all. Use web_fetch with 'raw: true' (no 'section') instead.`
+          );
+        }
+        const { text: finalText, truncated } = truncateChars(found, MAX_RETURNED_CHARS);
+        return truncated ? `${header}\n\n${finalText}\n\n... (truncated)` : `${header}\n\n${finalText}`;
+      }
+
       const { text: finalText, truncated: charsTruncated } = truncateChars(body, MAX_RETURNED_CHARS);
       const truncated = bodyTruncated || charsTruncated;
       return truncated ? `${header}\n\n${finalText}\n\n... (truncated)` : `${header}\n\n${finalText}`;

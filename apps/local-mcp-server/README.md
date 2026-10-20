@@ -119,12 +119,28 @@ from `src/outline.ts` as `read_file` uses for local `.md` files:
   content through the next heading of equal-or-higher level.
 - **`full: true`** – skip outline mode, return the entire converted page
   (still subject to the overall size cap below).
-- **`raw: true`** – bypass HTML→markdown conversion and outline mode
-  entirely; returns the response body as-is. Useful for JSON APIs or plain
-  text endpoints. Takes precedence over `full`/`section`.
+- **`raw: true`** – bypass HTML→markdown conversion, outline mode, and SPA
+  rendering entirely; returns the response body as-is. Useful for JSON APIs,
+  plain text endpoints, or whenever you need the exact markup (e.g. table
+  structure, tab/accordion markers, element attributes) that gets flattened
+  or lost by the markdown conversion. Takes precedence over `full` and
+  `render`.
+
+  `section` still works together with `raw: true` for HTML pages: instead of
+  matching against the markdown outline, it scans the raw HTML directly for
+  `<h1>`-`<h6>` tags, matches one by its visible text (substring,
+  case-insensitive), and returns the raw HTML from that heading's opening tag
+  through the next heading of equal-or-higher level (or the end of the
+  document). This gives you the unmodified markup for just one section
+  instead of the whole page, without ever going through the markdown
+  conversion. If no heading matches, or the page has no headings at all, the
+  call fails with an error explaining why (same shape as the markdown
+  `section` not-found error).
 
 Typical flow: `web_fetch({ url })` → see the outline → `web_fetch({ url,
-section: "Installation" })` to read just that part.
+section: "Installation" })` to read just that part → `web_fetch({ url,
+section: "Installation", raw: true })` if you need the exact HTML for that
+part instead of the markdown version.
 
 ### Rendering single-page apps (`render`) for `web_fetch`
 
