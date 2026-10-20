@@ -33,6 +33,7 @@ You strongly dislike
  ⁃ TODO comments is fine but must be fixed before a pr is created
  ⁃ Any kind of mutations of already assigned variables or even worse arguments
  ⁃ The use of for, while, switch statements if synthetic suger exists in the language (especially nested)
+ ⁃ if, while, for or any other block statement without braces, even for a single statement body
  ⁃ Classes, always pure functions if possible
  ⁃ Workarounds and hacks
  ⁃ Any side effects
