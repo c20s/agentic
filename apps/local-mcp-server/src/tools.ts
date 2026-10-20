@@ -13,6 +13,7 @@ import {
 } from "./outline";
 import { webTools } from "./web";
 import { ghReviewListTool } from "./gh-review-list";
+import { reviewTools } from "./review";
 import { getToolHelp } from "./tool-help";
 import { getContext } from "./context";
 import { logger } from "./logger";
@@ -528,16 +529,20 @@ const getContextSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Optional topic to look up, e.g. 'review' or 'get_project_overview'. Omit it to get the default " +
-      "project guideline for how to respond/behave. ALWAYS run the default prompt at before responding to the first user prompt"
+      "Optional topic to look up. Omit it to get the default project guideline for how to respond/behave " +
+      "(ALWAYS do this before responding to the first user prompt). Pass 'skills' to list the skills " +
+      "bundled with this MCP server (its own .apm/skills), a specific skill's name to read its full " +
+      "instructions, or '<skill-name>/references/<file>' to read one of that skill's reference files " +
+      "(listed when you fetch 'skills' or the skill itself)."
     ),
 });
 
 export const getContextTool: ToolDefinition<typeof getContextSchema> = {
   name: "get_context",
   description:
-    "Call with no args first for the default project guideline (how to respond/behave). Pass 'symbol' " +
-    "for a specific scripted topic, if one is known to exist.",
+    "Call with no args first for the default project guideline (how to respond/behave). Pass 'skills' to " +
+    "list the skills bundled with this MCP server, a skill's name to read it, '<skill-name>/references/<file>' " +
+    "to read one of its reference files, or any other 'symbol' for a scripted topic, if one is known to exist.",
   inputSchema: getContextSchema,
   handler: async ({ symbol }) => getContext(symbol),
 };
@@ -554,5 +559,6 @@ export const allTools = [
   toolHelpTool,
   getContextTool,
   ghReviewListTool,
+  ...reviewTools,
   ...webTools,
 ];

@@ -49,6 +49,25 @@ Read-only (context):
   `refresh: true` forces a re-fetch, `json: true` returns structured data
   instead of the rendered table. Also available standalone as `pnpm run prs`
   — see `apps/gh-review-list/README.md`.
+- `review_context` – builds the best available context for reviewing a change,
+  in one call, from one of five sources (`mode`):
+  - `"changes"` – everything uncommitted in the sandboxed project right now
+    (tracked edits + staged + untracked new files) vs `HEAD`.
+  - `"commit"` – one commit's diff vs its parent, plus its commit message
+    (needs `commit`, a SHA or ref).
+  - `"pr"` – a GitHub pull request's full diff, description, and every
+    existing comment (both conversation and inline review comments), fetched
+    via the `gh` CLI (needs `prUrl`; `gh` must be installed & authenticated).
+  - `"branch"` – a branch's diff vs its base, plus every commit in between
+    and their messages (needs `branch`, optional `baseRef`, default `main`).
+  - `"files"` – the full current content of an explicit file list, absolute
+    or sandbox-relative, no git history involved (needs `files`).
+
+  Optionally pass `skill` with the name of a skill from `.apm/skills` (see
+  `get_context({ symbol: "skills" })` below) to append that skill's full
+  instructions to the output, so the agent reviews the built context through
+  that specific lens. Unknown skill names fail with the list of valid ones.
+  See `src/review.ts`.
 - `tool_help` – fetch the full usage guide for one other tool by name (see
   "Tool descriptions vs. `tool_help`" below). Call this before relying on a
   tricky flag (`read_file`'s `symbol`/`full`, `edit_file`'s match rules,
@@ -57,9 +76,30 @@ Read-only (context):
   `tool_help` but for "how should I behave / what is this repo" instead of
   "how do I use this tool". Call with no args first for a short default
   guideline (tone, response style, how to explore this repo), loaded from
-  `prompts/default.md` — edit that file directly to change it. `symbol` is
-  reserved for future scripted topics (e.g. `review`, `get_project_overview`)
-  and currently always says so if passed. See `src/context.ts`.
+  `prompts/default.md` — edit that file directly to change it. Two more
+  `symbol` values are backed by **this `agentic` repo's own** `.apm/skills`
+  folder (APM-managed skills, same shape as `.claude/skills`: one
+  `<name>/SKILL.md` per skill with a YAML frontmatter `description`) —
+  always this repo's skills, regardless of which project's directory the
+  server's sandbox is currently pointed at (same category as
+  `prompts/default.md`: bundled with the server itself, not read through
+  the sandbox):
+  - `symbol: "skills"` lists every skill found there (name + description,
+    plus a `[references: ...]` note for any skill that has a
+    `references/*.md` folder).
+  - `symbol: "<skill-name>"` returns that one skill's full `SKILL.md` body
+    (with the same `references: ...` note appended if it has any).
+  - `symbol: "<skill-name>/references/<file>"` returns the full content of
+    one of that skill's `references/<file>.md` files verbatim — the
+    `SKILL.md` body only ever *links* to these (e.g.
+    `[TypeScript](references/typescript.md)`), it doesn't inline them, so
+    this is how an agent actually fetches one on demand instead of paying
+    for every reference file's tokens up front. Unknown skill/file names
+    fail with the list of what's actually there.
+
+  Any other `symbol` is reserved for future scripted topics (e.g. `review`,
+  `get_project_overview`) and currently just says so, also listing the
+  bundled skill names it did find (if any) as a hint. See `src/context.ts`.
 
 ### Tool descriptions vs. `tool_help`
 
