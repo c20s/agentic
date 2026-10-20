@@ -217,47 +217,13 @@ const FETCH_OUTLINE_THRESHOLD_CHARS = 4_000;
 const renderModeSchema = z
   .enum(["auto", "always", "never"])
   .default("auto")
-  .describe(
-    "Controls headless-browser (JavaScript) rendering for single-page apps: " +
-      "'auto' (default) fetches statically first and only falls back to rendering with a headless " +
-      "browser if the page looks like an unrendered SPA shell (e.g. an empty #root/#app div); " +
-      "'always' forces a browser render even if the static fetch looked fine (slower, but authoritative " +
-      "for pages with optimistic heuristics); 'never' disables rendering entirely, even for obvious SPA shells."
-  );
+  .describe("JS rendering for SPAs: auto=render only if needed, always=force, never=static only.");
 
 const webFetchSchema = z.object({
-  url: z.string().describe("The absolute http(s) URL to fetch, e.g. 'https://example.com/page'."),
-  full: z
-    .boolean()
-    .default(false)
-    .describe(
-      "If true, skip outline mode and return the full converted page content (still capped by the overall size limit). " +
-        "Ignored when 'raw' is true (raw mode never does markdown conversion, so there's no outline to skip). Default false."
-    ),
-  section: z
-    .string()
-    .optional()
-    .describe(
-      "Fetch just one section of the page instead of the whole thing: matched against a heading's text " +
-        "(substring, case-insensitive), returning that heading through the next heading of equal-or-higher level. " +
-        "Use this after seeing the outline (call web_fetch({url}) first), similar to read_file's 'symbol' parameter. " +
-        "Works whether or not 'raw' is also set: without 'raw' you get that section in markdown (the normal, " +
-        "cheaper choice); with 'raw: true' you get that section's exact unconverted HTML instead of the whole " +
-        "raw page."
-    ),
-  raw: z
-    .boolean()
-    .default(false)
-    .describe(
-      "Last resort, not a starting point: fetch the outline and/or a 'section' in markdown first, and only set " +
-        "'raw: true' if that's not enough (e.g. you need a table's real structure, tab/accordion boundaries, an " +
-        "element's exact attributes, a JSON/plain-text API body, or the markdown conversion looks wrong). " +
-        "When true, returns the response body as-is instead of converting HTML to markdown, and takes precedence " +
-        "over 'full' and 'render' (no markdown conversion, no SPA rendering happen in raw mode). " +
-        "Combine with 'section' to scope raw mode to one part of an HTML page instead of dumping the whole raw " +
-        "document: it matches an <h1>-<h6> tag by its visible text (substring, case-insensitive) and returns the " +
-        "raw HTML from that heading through the next heading of equal-or-higher level. Default false."
-    ),
+  url: z.string().describe("Absolute http(s) URL."),
+  full: z.boolean().default(false).describe("Full converted page instead of outline. Ignored if raw."),
+  section: z.string().optional().describe("One heading section only (substring match), markdown or raw HTML."),
+  raw: z.boolean().default(false).describe("Unconverted response body instead of markdown. See tool_help first."),
   render: renderModeSchema,
 });
 
@@ -311,27 +277,9 @@ function presentHtml(
 export const webFetchTool: ToolDefinition<typeof webFetchSchema> = {
   name: "web_fetch",
   description:
-    "Fetch a single URL over http(s). Read-only, GET only (no cookies/auth/state). " +
-    "HTML pages are converted to markdown-ish readable text (headings, links as [text](url)), and by default " +
-    "only an OUTLINE is returned (page title + all headings with their nesting, like read_file does for local " +
-    ".md files) instead of the full page — this avoids flooding context with a huge page. See 'Efficient usage' " +
-    "below for how 'section', 'full', and 'raw' fit together. " +
-    "Single-page apps (React/Vue/Angular etc.) that render content with client-side JavaScript are handled " +
-    "automatically: by default ('render: \"auto\"') a plain static fetch is tried first, and if the result " +
-    "looks like an empty, unrendered SPA shell, a headless Chromium browser (via playwright-core) renders the " +
-    "page and the real, post-JavaScript content is returned instead. Use 'render: \"always\"' to force a browser " +
-    "render, or 'render: \"never\"' to disable it. Rendering is slower (headless browser) so 'auto' only pays " +
-    "that cost when it looks necessary. " +
-    "Requests to localhost/private/link-local addresses are blocked. Responses are capped in size " +
-    `(~${MAX_FETCH_BYTES} bytes fetched, ~${MAX_RETURNED_CHARS} chars returned) and time out after ${DEFAULT_TIMEOUT_MS}ms. ` +
-    "Efficient usage, in order: " +
-    "(1) web_fetch({url}) first, to see the outline (headings only) without spending context on the full page; " +
-    "(2) web_fetch({url, section: \"...\"}) to read the one or two sections that look relevant, in markdown; " +
-    "(3) only if you specifically need exact, unconverted markup (e.g. a table's real structure, tab/accordion " +
-    "boundaries, an element's attributes, or markdown conversion looks like it dropped/garbled something) add " +
-    "'raw: true' — optionally still combined with 'section' to keep it scoped to one part instead of the whole " +
-    "raw page. Avoid reaching for 'raw: true' or 'full: true' by default: they cost more context and, for 'raw', " +
-    "lose the readable formatting most tasks don't need.",
+    "Fetch a URL (GET only, read-only). HTML -> markdown, default OUTLINE (headings only). Use 'section' " +
+    "for one part, 'full'/'raw' for more. SPAs auto-render via headless browser if needed. " +
+    "Call tool_help('web_fetch') before first use.",
   inputSchema: webFetchSchema,
   handler: async ({ url, full, section, raw, render }) => {
     const safeUrl = assertSafeUrl(url);
@@ -415,14 +363,8 @@ export const webFetchTool: ToolDefinition<typeof webFetchSchema> = {
 // ---------------------------------------------------------------------------
 
 const webSearchSchema = z.object({
-  query: z.string().describe("The search query."),
-  maxResults: z
-    .number()
-    .int()
-    .min(1)
-    .max(20)
-    .default(8)
-    .describe("Maximum number of results to return (1-20, default 8)."),
+  query: z.string().describe("Search query."),
+  maxResults: z.number().int().min(1).max(20).default(8),
 });
 
 interface SearchResult {
@@ -474,10 +416,7 @@ function parseDuckDuckGoHtml(html: string): SearchResult[] {
 
 export const webSearchTool: ToolDefinition<typeof webSearchSchema> = {
   name: "web_search",
-  description:
-    "Search the web for a query and return a list of results (title, URL, snippet). Read-only. " +
-    "Backed by DuckDuckGo's HTML results page, so no API key is required. " +
-    "Use web_fetch afterwards to read the full content of a specific result URL.",
+  description: "Web search -> list of {title, url, snippet}. Read-only, no API key. Follow up with web_fetch.",
   inputSchema: webSearchSchema,
   handler: async ({ query, maxResults }) => {
     const searchUrl = new URL("https://html.duckduckgo.com/html/");

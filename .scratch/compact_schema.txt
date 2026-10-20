@@ -1,0 +1,10 @@
+edit_file(path*, oldString*, newString*, replaceAll=false) - targeted search&replace edit; oldString must match exactly once unless replaceAll. Prefer over write_file for partial changes.
+file_stat(path*) - size/type/mtime of a file or dir.
+find_files(pattern*, path=".", caseSensitive=false) - find files by NAME/path (glob or substring), not content.
+list_dir(path=".", recursive=false) - list dir contents (max depth 6 if recursive).
+read_file(path*, symbol?, full=false, reason?) - read file; default=outline (md headings/ts signatures/json-yaml key paths). symbol=fetch one part. full=true needs reason if >4KB outlineable. Call tool_help("read_file") for format details.
+search_files(query*, path=".", filePattern?, regex=false, caseSensitive=false) - ripgrep content search (not filenames; use find_files for that).
+web_fetch(url*, section?, full=false, raw=false, render="auto") - fetch URL->markdown outline by default. Call tool_help("web_fetch") before first use for the outline->section->raw workflow and SPA rendering notes.
+web_search(query*, maxResults=8) - web search, returns title/url/snippet list.
+write_file(path*, content*, createDirs=true) - overwrite/create whole file. Prefer edit_file for partial changes.
+tool_help(name*) - get full documentation (edge cases, examples, detailed strategy) for one tool by name. Use when a one-liner above isn't enough to call a tool correctly, especially before first use of read_file or web_fetch.

@@ -11,6 +11,7 @@ import {
   extractYamlValueAtPath,
 } from "./outline";
 import { webTools } from "./web";
+import { getToolHelp } from "./tool-help";
 
 // File types/directories we never want to list or read by accident (noise/secrets).
 const DEFAULT_IGNORES = new Set([
@@ -43,14 +44,13 @@ export interface ToolDefinition<Schema extends z.ZodTypeAny> {
 // ---------------------------------------------------------------------------
 
 const listDirSchema = z.object({
-  path: z.string().default(".").describe("Directory to list, relative to the sandbox root. Default '.'"),
-  recursive: z.boolean().default(false).describe("List recursively (max depth 6)."),
+  path: z.string().default(".").describe("Dir to list, relative to sandbox root."),
+  recursive: z.boolean().default(false).describe("Recurse (max depth 6)."),
 });
 
 export const listDirTool: ToolDefinition<typeof listDirSchema> = {
   name: "list_dir",
-  description:
-    "List files and directories within the sandbox. Read-only. Use this to explore the project structure.",
+  description: "List files/dirs in the sandbox. Read-only.",
   inputSchema: listDirSchema,
   handler: async ({ path, recursive }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -86,46 +86,18 @@ export const listDirTool: ToolDefinition<typeof listDirSchema> = {
 const FULL_READ_FREE_THRESHOLD_BYTES = 4_000;
 
 const readFileSchema = z.object({
-  path: z.string().describe("Path to the file, relative to the sandbox root."),
-  full: z
-    .boolean()
-    .default(false)
-    .describe(
-      "Get the entire file content as-is, without outline shortening. " +
-        "USE SPARINGLY: read without 'full' first (you get an outline), then fetch specific " +
-        "parts with 'symbol'. For files larger than ~4KB of an outlineable type (.md/.ts/.json/.yaml), " +
-        "'reason' is also required together with full:true."
-    ),
-  reason: z
-    .string()
-    .optional()
-    .describe(
-      "Only required if full:true is used on a file >4KB of an outlineable type: a short justification " +
-        "for why you need the entire file content instead of outline/symbol (e.g. " +
-        "'need to see the whole file context for a large refactor')."
-    ),
-  symbol: z
-    .string()
-    .optional()
-    .describe(
-      "Fetch just a specific part of the file instead of the whole outline: " +
-        "for .md a heading section (matched against heading text, substring/case-insensitive), " +
-        "for .ts/.tsx/.js/.jsx a symbol name (function/const/interface/type/class/enum, full source code incl. body; " +
-        "for imports you can match on the module path, a substring of it, or an imported name, e.g. 'create' or 'member.create'), " +
-        "for .json/.yaml/.yml a key path (e.g. 'foo.bar.baz' or 'items[0].name')."
-    ),
+  path: z.string().describe("Path to the file, relative to sandbox root."),
+  full: z.boolean().default(false).describe("Whole file, no outline. >4KB outlineable files need 'reason' too."),
+  reason: z.string().optional().describe("Why you need 'full' on a large outlineable file. See tool_help."),
+  symbol: z.string().optional().describe("Fetch one part instead of the full outline: heading/symbol/key-path."),
 });
 
 export const readFileTool: ToolDefinition<typeof readFileSchema> = {
   name: "read_file",
   description:
-    "Read the content of a text file within the sandbox. Read-only. This is the primary way for the agent to get context. " +
-    "Default (no 'full' or 'symbol' given): returns a compact OUTLINE instead of the whole file: " +
-    "for .md all headings/subheadings with line numbers, " +
-    "for .ts/.tsx/.js/.jsx all top-level const/function/interface/type/class/enum signatures without body, " +
-    "for .json/.yaml/.yml all key paths recursively (e.g. foo.bar.baz, foo.bar, foo). " +
-    "Other file types are returned in full as usual. " +
-    "Pass 'symbol' to fetch a specific part (heading section/function/key value), or 'full: true' for the entire file.",
+    "Read a text file. Read-only. Default: compact OUTLINE (md headings / ts top-level signatures / " +
+    "json+yaml key paths), not the full file. Use 'symbol' for one part, 'full:true' for everything. " +
+    "Call tool_help('read_file') before relying on 'symbol' or 'full' for the first time.",
   inputSchema: readFileSchema,
   handler: async ({ path, full, reason, symbol }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -205,12 +177,12 @@ export const readFileTool: ToolDefinition<typeof readFileSchema> = {
 };
 
 const fileStatSchema = z.object({
-  path: z.string().describe("Path to get metadata for, relative to the sandbox root."),
+  path: z.string().describe("Path, relative to sandbox root."),
 });
 
 export const fileStatTool: ToolDefinition<typeof fileStatSchema> = {
   name: "file_stat",
-  description: "Get metadata (size, type, last modified) for a file or directory. Read-only.",
+  description: "Size/type/mtime of a file or dir. Read-only.",
   inputSchema: fileStatSchema,
   handler: async ({ path }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -234,17 +206,11 @@ export const fileStatTool: ToolDefinition<typeof fileStatSchema> = {
 };
 
 const searchFilesSchema = z.object({
-  query: z.string().describe("Text string or regex to search for in file content."),
-  path: z.string().default(".").describe("Directory (or file) to search within, relative to the sandbox root."),
-  filePattern: z
-    .string()
-    .optional()
-    .describe("Optional glob filter for file names, e.g. '*.ts' or '*.md' (ripgrep --glob)."),
+  query: z.string().describe("Text or regex to find in file content."),
+  path: z.string().default(".").describe("Dir/file to search within, relative to sandbox root."),
+  filePattern: z.string().optional().describe("Glob filter, e.g. '*.ts' (ripgrep --glob)."),
   caseSensitive: z.boolean().default(false),
-  regex: z
-    .boolean()
-    .default(false)
-    .describe("Interpret query as regex instead of plain text (default: plain text search)."),
+  regex: z.boolean().default(false).describe("Treat query as regex (default: literal text)."),
 });
 
 /** Runs ripgrep and collects stdout. Throws on rg exit code > 1 (1 = no matches, OK). */
@@ -269,10 +235,8 @@ async function runRipgrep(args: string[], cwd: string): Promise<{ stdout: string
 export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
   name: "search_files",
   description:
-    "Search for text or regex in file CONTENT within the sandbox, using ripgrep. Read-only. " +
-    "Good for finding where something is defined or used. " +
-    "NOTE: this searches file content, not file names — if you're looking for a file based on " +
-    "its name/path (e.g. 'where is invite-member-command.ts?'), use find_files instead.",
+    "Search file CONTENT (not names — use find_files for that) via ripgrep. Read-only. " +
+    "Good for finding where something is defined/used.",
   inputSchema: searchFilesSchema,
   handler: async ({ query, path, filePattern, caseSensitive, regex }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -327,22 +291,15 @@ export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
 const findFilesSchema = z.object({
   pattern: z
     .string()
-    .describe(
-      "Glob pattern or substring to match against FILE NAME/PATH (not content), e.g. " +
-        "'*.ts', '*invite*', 'src/**/*.test.ts'. If the pattern doesn't contain any of the characters " +
-        "* ? [ ] it's treated as a substring match against the full relative path."
-    ),
-  path: z.string().default(".").describe("Directory to search within, relative to the sandbox root."),
+    .describe("Glob or substring to match FILE NAME/PATH (not content), e.g. '*.ts', 'invite'."),
+  path: z.string().default(".").describe("Dir to search within, relative to sandbox root."),
   caseSensitive: z.boolean().default(false),
 });
 
 export const findFilesTool: ToolDefinition<typeof findFilesSchema> = {
   name: "find_files",
   description:
-    "Find files based on FILE NAME/PATH (not content) within the sandbox, using ripgrep --files. " +
-    "Read-only. Use this when you know (or are guessing) a file's name but not where it lives — " +
-    "e.g. find_files({ pattern: '*invite*' }) to find all files with 'invite' in the name. " +
-    "Complements search_files (which searches file CONTENT) and list_dir (which requires you to already be in the right directory).",
+    "Find files by NAME/PATH (not content — use search_files for content) via ripgrep --files. Read-only.",
   inputSchema: findFilesSchema,
   handler: async ({ pattern, path, caseSensitive }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -387,23 +344,16 @@ export const findFilesTool: ToolDefinition<typeof findFilesSchema> = {
 // ---------------------------------------------------------------------------
 
 const writeFileSchema = z.object({
-  path: z.string().describe("Path to the file to write, relative to the sandbox root."),
-  content: z.string().describe("The complete file content to write (replaces any existing content)."),
-  createDirs: z
-    .boolean()
-    .default(true)
-    .describe("Create missing directories in the path if they don't exist."),
+  path: z.string().describe("Path to write, relative to sandbox root."),
+  content: z.string().describe("Full file content (replaces anything existing)."),
+  createDirs: z.boolean().default(true).describe("Create missing parent dirs."),
 });
 
 export const writeFileTool: ToolDefinition<typeof writeFileSchema> = {
   name: "write_file",
   description:
-    "Write (create or overwrite) a file within the sandbox with the ENTIRE file content at once. " +
-    "WARNING: this replaces the full content of the file — if you only want to change part of an " +
-    "existing file (e.g. a function, a line, adding an import), use edit_file instead, which makes a " +
-    "targeted change without you needing to know or send the whole file's content. " +
-    "Use write_file to CREATE a new file, or when you deliberately want to replace a file's full content " +
-    "and you have actually read the whole file (full:true) first.",
+    "Create a file, or overwrite one's ENTIRE content. For partial edits of an existing file use " +
+    "edit_file instead. Call tool_help('write_file') before overwriting a file you haven't fully read.",
   inputSchema: writeFileSchema,
   handler: async ({ path, content, createDirs }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -416,33 +366,18 @@ export const writeFileTool: ToolDefinition<typeof writeFileSchema> = {
 };
 
 const editFileSchema = z.object({
-  path: z.string().describe("Path to the file to edit, relative to the sandbox root. The file must already exist."),
-  oldString: z
-    .string()
-    .describe(
-      "The exact text string to replace (incl. whitespace/indentation). Must match EXACTLY once " +
-        "in the file, otherwise the edit is rejected (see replaceAll for multiple occurrences)."
-    ),
-  newString: z.string().describe("The text to replace oldString with."),
-  replaceAll: z
-    .boolean()
-    .default(false)
-    .describe(
-      "If true: replace ALL occurrences of oldString instead of requiring exactly one match. " +
-        "Use with caution — default false requires exactly one match to avoid unintended changes."
-    ),
+  path: z.string().describe("Path to an EXISTING file, relative to sandbox root."),
+  oldString: z.string().describe("Exact text to replace; must match exactly once unless replaceAll."),
+  newString: z.string().describe("Replacement text."),
+  replaceAll: z.boolean().default(false).describe("Replace all matches instead of requiring exactly one."),
 });
 
 export const editFileTool: ToolDefinition<typeof editFileSchema> = {
   name: "edit_file",
   description:
-    "Make a TARGETED change to an existing file via search-and-replace (oldString → newString), without needing " +
-    "to know or send the whole file's content. This is the PREFERRED way to change an existing " +
-    "file — use this instead of write_file when you're only adding/changing/removing a bounded part " +
-    "(e.g. adding an import, changing a function's body, adding a new export). " +
-    "oldString must match exactly once in the file (unless replaceAll:true is used) — this is a safety guard " +
-    "so an edit never hits the wrong place or accidentally overwrites something you haven't seen. " +
-    "If you're unsure of the exact current text: read the file (or the relevant symbol/section) with read_file first.",
+    "Targeted search-and-replace edit (oldString -> newString) without sending the whole file. " +
+    "PREFERRED over write_file for partial changes. oldString must match exactly once (or pass " +
+    "replaceAll). Not sure of exact current text? read_file first.",
   inputSchema: editFileSchema,
   handler: async ({ path, oldString, newString, replaceAll }, sandbox) => {
     const abs = sandbox.resolve(path);
@@ -495,6 +430,24 @@ export const editFileTool: ToolDefinition<typeof editFileSchema> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// ON-DEMAND DOCS (kept out of every other tool's description — see tool-help.ts)
+// ---------------------------------------------------------------------------
+
+const toolHelpSchema = z.object({
+  name: z.string().describe("Tool name, e.g. 'read_file' or 'web_fetch'."),
+});
+
+export const toolHelpTool: ToolDefinition<typeof toolHelpSchema> = {
+  name: "tool_help",
+  description:
+    "Full usage guide for one tool (edge cases, multi-step workflow, the 'why' behind a constraint). " +
+    "Call this before the first tricky use of read_file, edit_file, write_file, find_files, " +
+    "search_files or web_fetch — their one-line descriptions are intentionally terse.",
+  inputSchema: toolHelpSchema,
+  handler: async ({ name }) => getToolHelp(name),
+};
+
 export const allTools = [
   listDirTool,
   readFileTool,
@@ -503,5 +456,6 @@ export const allTools = [
   findFilesTool,
   writeFileTool,
   editFileTool,
+  toolHelpTool,
   ...webTools,
 ];

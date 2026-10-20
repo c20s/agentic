@@ -41,6 +41,32 @@ Read-only (context):
 - `web_search` – search the web (backed by DuckDuckGo's no-JS HTML results
   page, so no API key is needed) and return a list of `{ title, url,
   snippet }` results. Pair with `web_fetch` to read a specific result.
+- `tool_help` – fetch the full usage guide for one other tool by name (see
+  "Tool descriptions vs. `tool_help`" below). Call this before relying on a
+  tricky flag (`read_file`'s `symbol`/`full`, `edit_file`'s match rules,
+  `web_fetch`'s `section`/`raw`/`render`) for the first time.
+
+### Tool descriptions vs. `tool_help`
+
+Every tool's `description` (and its parameters' `.describe()` text) is sent
+to the model on **every single turn**, for the whole session — unlike file or
+page content, it can't be fetched lazily by the model choosing not to read it.
+So `src/tools.ts`/`src/web.ts` intentionally keep these to one dense, plain
+English line: just enough to pick the right tool among near-duplicates
+(`search_files` vs `find_files`, `edit_file` vs `write_file`) and call it with
+roughly correct arguments.
+
+The long-form guidance that used to live inline in those descriptions — multi-
+step workflows (`web_fetch`'s outline → section → raw), the reasoning behind
+a constraint (`edit_file`'s exactly-one-match rule), worked examples — now
+lives in `src/tool-help.ts` and is fetched on demand via `tool_help({ name })`.
+It's the same content, just relocated so it's paid for (in context tokens)
+only in the turns where an agent actually requests it, rather than on every
+turn regardless of whether that tool is even used in the session.
+
+Runtime error messages (e.g. "oldString matches 3 places, not exactly one...")
+are deliberately kept verbose and unchanged — those are only sent back when
+actually triggered, so there's no reason to compress them.
 
 ### Outline mode for `read_file`
 

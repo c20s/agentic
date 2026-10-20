@@ -1,0 +1,12 @@
+edit_file: path*,oldString*,newString*,replaceAll=F → 1 exact match required unless replaceAll. ≻write_file for partial edits.
+file_stat: path* → size/type/mtime.
+find_files: pattern*,path=".",caseSensitive=F → by NAME not content. glob or substring.
+list_dir: path=".",recursive=F(depth≤6) → dir listing.
+read_file: path*,symbol?,full=F,reason?(req if full & >4KB) → default=outline(md:headings,ts:sigs,json/yaml:keypaths). symbol=1 part. ?tool_help.
+search_files: query*,path=".",filePattern?,regex=F,caseSensitive=F → by CONTENT not name(≻find_files for that). ripgrep.
+web_fetch: url*,section?,full=F,raw=F,render=auto|always|never → default=outline. SPA auto-renders. ?tool_help before 1st use.
+web_search: query*,maxResults=8[1-20] → title/url/snippet[].
+write_file: path*,content*,createDirs=T → full overwrite. ≻edit_file for partial.
+tool_help: name* → full docs for 1 tool. use before 1st web_fetch/read_file call, or on param error.
+
+legend: *required ?optional F/T=false/true ≻prefer ?tool_help=call tool_help first
