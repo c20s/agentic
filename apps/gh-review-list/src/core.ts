@@ -6,6 +6,10 @@ import type { Config, EnrichedPullRequest, PullRequest, ReviewListResult } from 
 export { loadConfig, CONFIG_PATH };
 export * from "./types";
 
+/** Bump whenever ReviewListResult's shape changes, so stale on-disk cache entries from an older
+ *  version are treated as a miss instead of being handed back as-is and breaking downstream code. */
+const CACHE_SCHEMA_VERSION = 2;
+
 export interface GetReviewListOptions {
   /** Path to the config file. Defaults to ~/.config/c20s/prs.json. */
   configPath?: string;
@@ -106,6 +110,11 @@ async function fetchMine(login: string): Promise<PullRequest[]> {
   ]);
 }
 
+async function fetchAuthored(login: string): Promise<PullRequest[]> {
+  const authored = await gh.searchPrs(["--author", "@me", "--state", "open"]);
+  return dedupe(authored.map((p) => toPullRequest(p, "authored")));
+}
+
 async function fetchTeam(config: Config, excludeLogins: Set<string>): Promise<PullRequest[]> {
   const memberLists = await Promise.all(
     config.teams.map((slug) => {
@@ -139,22 +148,27 @@ export async function getReviewList(options: GetReviewListOptions = {}): Promise
   const ttl = options.cacheTtlSeconds ?? config.cacheTtlSeconds;
   const login = await gh.currentUser();
 
-  const cacheKey = JSON.stringify({ login, config });
+  const cacheKey = JSON.stringify({ v: CACHE_SCHEMA_VERSION, login, config });
   const { value, fromCache } = await withCache(
     cacheKey,
     ttl,
     async () => {
-      const minePrs = await fetchMine(login);
+      const [minePrs, authoredPrs] = await Promise.all([fetchMine(login), fetchAuthored(login)]);
       const mine = sortByNumber(await enrich(login, minePrs));
+      const authored = sortByNumber(await enrich(login, authoredPrs));
 
-      const mineKeys = new Set(mine.map((pr) => `${pr.repository}#${pr.number}`));
-      const teamPrs = await fetchTeam(config, mineKeys);
+      const excludeKeys = new Set([
+        ...mine.map((pr) => `${pr.repository}#${pr.number}`),
+        ...authored.map((pr) => `${pr.repository}#${pr.number}`),
+      ]);
+      const teamPrs = await fetchTeam(config, excludeKeys);
       const team = sortByAuthor(await enrich(login, teamPrs));
 
       return {
         generatedAt: new Date().toISOString(),
         login,
         mine,
+        authored,
         team,
       };
     },

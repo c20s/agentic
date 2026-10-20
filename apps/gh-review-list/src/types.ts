@@ -17,8 +17,8 @@ export interface PullRequest {
   url: string;
   createdAt: string;
   updatedAt: string;
-  /** Why this PR is in the list: assigned to me, requested for review, or via a team/author search. */
-  source: "assigned" | "review-requested" | "search";
+  /** Why this PR is in the list: assigned to me, requested for review, authored by me, or via a team/author search. */
+  source: "assigned" | "review-requested" | "authored" | "search";
 }
 
 export interface EnrichedPullRequest extends PullRequest, PrEnrichment {
@@ -31,6 +31,7 @@ export interface ReviewListResult {
   generatedAt: string;
   login: string;
   mine: EnrichedPullRequest[];
+  authored: EnrichedPullRequest[];
   team: EnrichedPullRequest[];
   fromCache: boolean;
 }

@@ -1,7 +1,8 @@
 # gh-review-list
 
-Lists open GitHub PRs you care about: your own (assigned + review-requested) and your team's
-(for spotting things to review), enriched with review/comment status and a computed priority.
+Lists open GitHub PRs you care about: your own (assigned + review-requested), PRs you've authored,
+and your team's (for spotting things to review), enriched with review/comment status and a computed
+priority.
 
 Used both as a CLI (`pnpm run prs` from the repo root) and as the `gh_review_list` tool in
 `local-mcp-server`.
@@ -41,15 +42,18 @@ All fields are optional; missing file = defaults (no team, no caching beyond 120
 
 ## Caching
 
-Results (your PRs + team PRs, fully enriched) are cached under `~/.cache/c20s/prs/`, keyed by your
-GitHub login and the active config, so repeated calls within `cacheTtlSeconds` don't re-hit `gh` at
-all. Pass `--refresh` (CLI) or `{ refresh: true }` (library/MCP) to force a re-fetch.
+Results (your PRs + authored PRs + team PRs, fully enriched) are cached under `~/.cache/c20s/prs/`,
+keyed by your GitHub login, the active config, and an internal cache schema version, so repeated
+calls within `cacheTtlSeconds` don't re-hit `gh` at all. The schema version is bumped whenever
+`ReviewListResult`'s shape changes, so upgrading never hands back a stale, incompatible cache entry —
+it's just treated as a miss. Pass `--refresh` (CLI) or `{ refresh: true }` (library/MCP) to force a
+re-fetch regardless.
 
 ## Library usage (used by local-mcp-server)
 
 ```ts
 import { getReviewList, renderReviewList } from "gh-review-list";
 
-const result = await getReviewList(); // { mine, team, login, generatedAt, fromCache }
+const result = await getReviewList(); // { mine, authored, team, login, generatedAt, fromCache }
 console.log(renderReviewList(result));
 ```

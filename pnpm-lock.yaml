@@ -168,11 +168,26 @@ importers:
 
   apps/generate-git-commit: {}
 
+  apps/gh-review-list:
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.3
+        version: 1.4.3
+      bun-types:
+        specifier: 1.4.3
+        version: 1.4.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   apps/local-mcp-server:
     dependencies:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(zod@4.6.7)
+      gh-review-list:
+        specifier: workspace:*
+        version: link:../gh-review-list
       typescript:
         specifier: 5.9.3
         version: 5.9.3

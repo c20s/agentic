@@ -16,10 +16,10 @@ const ghReviewListSchema = z.object({
 export const ghReviewListTool: ToolDefinition<typeof ghReviewListSchema> = {
   name: "gh_review_list",
   description:
-    "Lists open GitHub PRs that need attention: your own (assigned + review-requested) and your " +
-    "team's (for review), enriched with review/comment status and priority. Backed by the `gh` CLI " +
-    "and cached on disk (see ~/.config/c20s/prs.json for config, cacheTtlSeconds for TTL). " +
-    "Pass refresh:true to force a re-fetch.",
+    "Lists open GitHub PRs that need attention: your own (assigned + review-requested), PRs you " +
+    "authored, and your team's (for review), enriched with review/comment status and priority. " +
+    "Backed by the `gh` CLI and cached on disk (see ~/.config/c20s/prs.json for config, " +
+    "cacheTtlSeconds for TTL). Pass refresh:true to force a re-fetch.",
   inputSchema: ghReviewListSchema,
   handler: async ({ refresh, json }) => {
     const result = await getReviewList({ refresh });

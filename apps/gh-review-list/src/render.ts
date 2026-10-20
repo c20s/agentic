@@ -13,15 +13,15 @@ function color(code: string, text: string): string {
 }
 
 function approvedIcon(pr: EnrichedPullRequest): string {
-  if (pr.reviewDecision === "APPROVED") return color(GREEN, "✅");
-  if (pr.reviewDecision === "CHANGES_REQUESTED") return color(RED, "❌");
-  return color(YELLOW, "⏳");
+  if (pr.reviewDecision === "APPROVED") return color(GREEN, "✓");
+  if (pr.reviewDecision === "CHANGES_REQUESTED") return color(RED, "✗");
+  return color(YELLOW, "◷");
 }
 
 function commentIcon(pr: EnrichedPullRequest): string {
-  if (pr.commentedByMe && pr.updatedSinceMyComment) return color(RED, "🔄");
-  if (pr.commentedByMe) return color(DIM, "💬");
-  return " ";
+  if (pr.commentedByMe && pr.updatedSinceMyComment) return color(RED, "💬!");
+  if (pr.commentedByMe) return color(CYAN, "💬");
+  return color(DIM, "—");
 }
 
 /** Visible width of a string, treating common emoji as width 2 (good enough for our fixed icon set). */
@@ -77,21 +77,21 @@ function buildColumns(prs: EnrichedPullRequest[], mode: "team" | "mine"): Column
   const titleWidth = 50;
 
   const cols: Column[] = [
-    { header: " ", width: 2, get: approvedIcon },
-    { header: " ", width: 2, get: commentIcon },
+    { header: " ", width: 1, get: approvedIcon },
+    { header: " ", width: 3, get: commentIcon },
     {
       header: "PR",
       width: prLabelWidth,
       get: (pr) => hyperlink(pr.url, `#${pr.number}`),
     },
-    { header: "repo", width: Math.min(repoWidth, 30), get: (pr) => truncate(pr.repository, 30) },
+    { header: "Repository", width: Math.min(repoWidth, 30), get: (pr) => truncate(pr.repository, 30) },
   ];
   if (mode === "team") {
-    cols.push({ header: "author", width: Math.min(authorWidth, 16), get: (pr) => truncate(pr.author, 16) });
+    cols.push({ header: "Author", width: Math.min(authorWidth, 16), get: (pr) => truncate(pr.author, 16) });
   }
   cols.push(
-    { header: "created", width: dateWidth, get: (pr) => pr.createdAt.slice(0, 10) },
-    { header: "title", width: titleWidth, get: (pr) => truncate(pr.title, titleWidth) }
+    { header: "Created", width: dateWidth, get: (pr) => pr.createdAt.slice(0, 10) },
+    { header: "Title", width: titleWidth, get: (pr) => truncate(pr.title, titleWidth) }
   );
   return cols;
 }
@@ -104,31 +104,52 @@ function formatRow(cols: Column[], pr: EnrichedPullRequest): string {
   return cols.map((c) => pad(c.get(pr), c.width)).join("  ");
 }
 
+function ruleWidth(cols: Column[]): number {
+  return cols.reduce((sum, c) => sum + c.width, 0) + 2 * (cols.length - 1);
+}
+
 function renderTable(title: string, prs: EnrichedPullRequest[], mode: "team" | "mine"): string {
-  if (prs.length === 0) return `${color(BOLD, title)}\n  ${color(DIM, "(none)")}`;
+  const heading = color(BOLD, title);
+  if (prs.length === 0) return `${heading}\n  ${color(DIM, "(none)")}`;
   const cols = buildColumns(prs, mode);
-  const lines = [color(BOLD, `${title} (${prs.length})`), formatHeader(cols)];
-  for (const pr of prs) lines.push(formatRow(cols, pr));
+  const lines = [
+    heading,
+    formatHeader(cols),
+    color(DIM, "─".repeat(ruleWidth(cols))),
+    ...prs.map((pr) => formatRow(cols, pr)),
+    "",
+    color(DIM, `Total: ${prs.length} open PR${prs.length === 1 ? "" : "s"}`),
+  ];
   return lines.join("\n");
 }
 
 const LEGEND = [
-  `${color(GREEN, "✅")} approved   ${color(RED, "❌")} changes requested   ${color(YELLOW, "⏳")} pending/review required`,
-  `${color(RED, "🔄")} you commented, PR updated since (needs re-review)   ${color(DIM, "💬")} you commented, not updated since`,
+  color(BOLD, "Legend"),
+  `  ${color(GREEN, "✓")} Approved`,
+  `  ${color(RED, "✗")} Changes requested`,
+  `  ${color(YELLOW, "◷")} Not reviewed yet`,
+  `  ${color(RED, "💬!")} Commented (updated since)`,
+  `  ${color(CYAN, "💬")} Commented`,
+  `  ${color(DIM, "—")} No comments`,
 ].join("\n");
 
 export function renderReviewList(result: {
   mine: EnrichedPullRequest[];
+  authored: EnrichedPullRequest[];
   team: EnrichedPullRequest[];
   login: string;
   fromCache: boolean;
 }): string {
+  const grandTotal = result.team.length + result.mine.length + result.authored.length;
   const parts = [
     renderTable("Team PRs", result.team, "team"),
     "",
-    renderTable("My PRs", result.mine, "mine"),
+    renderTable("My PRs (Assigned or Reviewed)", result.mine, "mine"),
     "",
-    color(DIM, `Total: ${result.team.length} team, ${result.mine.length} mine — as ${result.login}`) +
+    renderTable("My authored PRs", result.authored, "mine"),
+    "",
+    color(BOLD, `Grand Total: ${grandTotal} open PR${grandTotal === 1 ? "" : "s"}`) +
+      color(DIM, `  — as ${result.login}`) +
       (result.fromCache ? color(DIM, "  (cached)") : ""),
     "",
     LEGEND,
