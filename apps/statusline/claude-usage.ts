@@ -1,6 +1,12 @@
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 
+/**
+ * Prices in USD per million tokens, from https://www.anthropic.com/pricing#api (check there when
+ * adding/updating a model or verifying a number changed in this file during review). Keep model
+ * ids in sync with the `message.model` values that actually show up in `~/.claude/projects/**\/*.jsonl`
+ * transcripts, not the marketing names.
+ */
 export const PRICING: Record<string, Pricing> = {
   "claude-opus-5": { input: 5, output: 25, cacheWrite5m: 6.25, cacheWrite1h: 10, cacheRead: 0.5 },
   "claude-opus-4-8": { input: 5, output: 25, cacheWrite5m: 6.25, cacheWrite1h: 10, cacheRead: 0.5 },
@@ -23,7 +29,20 @@ export const PRICING: Record<string, Pricing> = {
 
 const FALLBACK_PRICING = PRICING["claude-sonnet-5"];
 
-export const pricingFor = (model: string): Pricing => PRICING[model] ?? FALLBACK_PRICING;
+// Warn (once per model id, to stderr so it never corrupts statusline stdout) when a model is
+// billed using fallback pricing, so a new/renamed model silently using the wrong price has some
+// visible trace instead of just quietly under/over-reporting cost forever.
+const warnedUnknownModels = new Set<string>();
+
+export const pricingFor = (model: string): Pricing => {
+  const pricing = PRICING[model];
+  if (pricing) return pricing;
+  if (!warnedUnknownModels.has(model)) {
+    warnedUnknownModels.add(model);
+    console.error(`claude-usage: no pricing entry for model "${model}", falling back to sonnet-5 pricing.`);
+  }
+  return FALLBACK_PRICING;
+};
 
 export const emptyUsage = (): Usage => ({ input: 0, output: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0 });
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import { execSync } from "child_process";
 import { homedir } from "os";
 import { basename, join } from "path";
 import {
@@ -30,7 +29,7 @@ async function main() {
     .reduce(mergeUsageByModel, new Map<string, Usage>() as UsageByModel);
 
   const modelLabel = input.model?.display_name ?? input.model?.id ?? "claude";
-  const project = projectName(input.cwd);
+  const project = await projectName(input.cwd);
 
   const line = [
     ...(project ? [project] : []),
@@ -43,21 +42,22 @@ async function main() {
   console.log("-");
 }
 
-const projectName = (cwd?: string): string | null => {
+const projectName = async (cwd?: string): Promise<string | null> => {
   if (!cwd) return null;
 
-  const gitRoot = gitTopLevel(cwd);
+  const gitRoot = await gitTopLevel(cwd);
   return basename(gitRoot ?? cwd);
 };
 
-const gitTopLevel = (cwd: string): string | null => {
+const gitTopLevel = async (cwd: string): Promise<string | null> => {
   try {
-    return execSync("git rev-parse --show-toplevel", {
+    const proc = Bun.spawn(["git", "rev-parse", "--show-toplevel"], {
       cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .trim();
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const [output, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return exitCode === 0 ? output.trim() : null;
   } catch {
     return null;
   }

@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,8 +36,28 @@ import { fileURLToPath } from "node:url";
  */
 const MCP_SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = join(MCP_SERVER_DIR, "..", "prompts");
-// MCP_SERVER_DIR is apps/local-mcp-server/src -> repo root is three levels up.
-const APM_SKILLS_DIR = join(MCP_SERVER_DIR, "..", "..", "..", ".apm", "skills");
+
+/**
+ * Walks up from `startDir` looking for a `.apm` directory, so this doesn't silently break (by
+ * quietly pointing at a nonexistent path -> empty skills list) if this module ever moves to a
+ * different depth relative to the repo root. Falls back to the historical fixed depth (repo root
+ * = three levels up from apps/local-mcp-server/src) if no `.apm` is found anywhere above, so
+ * behavior is unchanged in the layout this repo actually has today.
+ */
+function findApmSkillsDir(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(join(dir, ".apm"))) {
+      return join(dir, ".apm", "skills");
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+  return join(startDir, "..", "..", "..", ".apm", "skills");
+}
+
+const APM_SKILLS_DIR = findApmSkillsDir(MCP_SERVER_DIR);
 
 function loadPrompt(name: string): string {
   return readFileSync(join(PROMPTS_DIR, name), "utf-8").trim();

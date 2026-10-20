@@ -65,7 +65,7 @@ const watchRepo = async (gitDir: string, repoLabel: string): Promise<FSWatcher |
       check();
     });
   } catch {
-    console.log(`Varning: kunde inte lyssna på ${logsDir} (inga commits än?)`);
+    console.log(`Warning: could not watch ${logsDir} (no commits yet?)`);
     return null;
   }
 };
@@ -75,11 +75,11 @@ const main = async () => {
   const gitDirs = await findGitDirs(root);
 
   if (gitDirs.length === 0) {
-    console.log(`Inga .git-mappar hittades under ${root}`);
+    console.log(`No .git directories found under ${root}`);
     return;
   }
 
-  console.log(`Lyssnar på ${gitDirs.length} repo(n) under ${root}:`);
+  console.log(`Watching ${gitDirs.length} repo(s) under ${root}:`);
   for (const dir of gitDirs) console.log(`  - ${dir}`);
 
   const watchers = (

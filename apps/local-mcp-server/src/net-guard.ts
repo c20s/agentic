@@ -8,7 +8,16 @@
  * Kept as one module so both call sites can't drift out of sync.
  */
 
-/** True if `hostname` resolves to loopback/private/link-local/CGNAT space and must be blocked. */
+/**
+ * True if `hostname` resolves to loopback/private/link-local/CGNAT space and must be blocked.
+ *
+ * NOTE: this only inspects the literal hostname/IP string, it does not resolve DNS names. A
+ * hostname that LOOKS public but resolves to a blocked address (classic DNS rebinding, e.g. a
+ * domain pointed at 127.0.0.1 or 169.254.169.254) will NOT be caught here. Mitigating that would
+ * require resolving the hostname ourselves and re-checking the resolved IP (and re-checking on
+ * every redirect/connection, since DNS can change between check and connect) — out of scope for
+ * this guard today; treat it as a known gap, not a guarantee against rebinding attacks.
+ */
 export function isBlockedHostname(hostname: string): boolean {
   const h = hostname.toLowerCase();
   if (h === "localhost" || h.endsWith(".localhost")) return true;

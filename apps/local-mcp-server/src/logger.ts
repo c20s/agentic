@@ -38,8 +38,12 @@ for (const path of [LOG_PATH, SUMMARY_LOG_PATH]) {
   if (!path) continue;
   try {
     mkdirSync(dirname(path), { recursive: true });
-  } catch {
-    // if the directory can't be created we just fall back to stderr below
+  } catch (err) {
+    // Fall back to stderr-only logging, but say so once at startup — otherwise a permissions
+    // issue on the log directory just looks like "tail -f shows nothing", with no clue why.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`mcp-local-fs logger: could not create log directory for "${path}" (${message}); ` +
+      "falling back to stderr-only logging for this path.");
   }
 }
 

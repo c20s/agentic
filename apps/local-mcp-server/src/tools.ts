@@ -48,6 +48,48 @@ function isIgnored(name: string) {
   return DEFAULT_IGNORES.has(name);
 }
 
+/** Shape of a ripgrep `--json` "match" event; other event types ("begin", "end", "summary") are ignored. */
+interface RipgrepMatchEvent {
+  type: "match";
+  data: {
+    path: { text: string };
+    line_number: number;
+    lines: { text: string };
+  };
+}
+
+function hasStringTextField(value: unknown): value is { text: string } {
+  return typeof value === "object" && value !== null && typeof (value as { text?: unknown }).text === "string";
+}
+
+function isRipgrepMatchEvent(value: unknown): value is RipgrepMatchEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (v.type !== "match") return false;
+  const data = v.data as Record<string, unknown> | undefined;
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    hasStringTextField(data.path) &&
+    typeof data.line_number === "number" &&
+    hasStringTextField(data.lines)
+  );
+}
+
+/** Counts non-overlapping occurrences of `needle` in `haystack` without allocating the split array. */
+function countOccurrences(haystack: string, needle: string): number {
+  if (needle.length === 0) return 0;
+  let count = 0;
+  let fromIndex = 0;
+  while (true) {
+    const idx = haystack.indexOf(needle, fromIndex);
+    if (idx === -1) break;
+    count++;
+    fromIndex = idx + needle.length;
+  }
+  return count;
+}
+
 export interface ToolDefinition<Schema extends z.ZodTypeAny> {
   name: string;
   description: string;
@@ -281,17 +323,17 @@ export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
     const matches: string[] = [];
     for (const line of stdout.split("\n")) {
       if (!line.trim()) continue;
-      let event: any;
+      let event: unknown;
       try {
         event = JSON.parse(line);
       } catch {
         continue;
       }
-      if (event.type !== "match") continue;
+      if (!isRipgrepMatchEvent(event)) continue;
 
-      const filePath: string = event.data.path.text;
-      const lineNumber: number = event.data.line_number;
-      const lineText: string = event.data.lines.text.replace(/\n$/, "");
+      const filePath = event.data.path.text;
+      const lineNumber = event.data.line_number;
+      const lineText = event.data.lines.text.replace(/\n$/, "");
       const rel = relative(sandbox.root, filePath);
 
       matches.push(`${rel}:${lineNumber}: ${lineText.trim()}`);
@@ -419,7 +461,7 @@ export const editFileTool: ToolDefinition<typeof editFileSchema> = {
       throw new Error("oldString and newString are identical — nothing to change.");
     }
 
-    const occurrences = content.split(oldString).length - 1;
+    const occurrences = countOccurrences(content, oldString);
 
     if (occurrences === 0) {
       throw new Error(
@@ -490,11 +532,11 @@ export const deleteFileTool: ToolDefinition<typeof deleteFileSchema> = {
     await mkdir(dirname(dest), { recursive: true });
     try {
       await rename(abs, dest);
-    } catch (err: any) {
+    } catch (err: unknown) {
       // rename() can't cross filesystem/device boundaries (e.g. project on a different disk/
       // volume than the home directory, common in containers) — fall back to copy-then-remove
       // in that specific case only, so the trash root can safely live outside the sandbox.
-      if (err?.code === "EXDEV") {
+      if ((err as NodeJS.ErrnoException)?.code === "EXDEV") {
         await cp(abs, dest, { recursive: true });
         await rm(abs, { recursive: true, force: true });
       } else {

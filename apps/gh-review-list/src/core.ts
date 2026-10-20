@@ -104,7 +104,7 @@ function archivedArgs(config: Config): string[] {
   return config.includeArchived ? [] : ["--archived=false"];
 }
 
-async function fetchMine(login: string, config: Config): Promise<PullRequest[]> {
+async function fetchMine(config: Config): Promise<PullRequest[]> {
   const archived = archivedArgs(config);
   const [assigned, reviewRequested] = await Promise.all([
     gh.searchPrs(["--assignee", "@me", "--state", "open", ...archived]),
@@ -116,7 +116,7 @@ async function fetchMine(login: string, config: Config): Promise<PullRequest[]> 
   ]);
 }
 
-async function fetchAuthored(login: string, config: Config): Promise<PullRequest[]> {
+async function fetchAuthored(config: Config): Promise<PullRequest[]> {
   const authored = await gh.searchPrs(["--author", "@me", "--state", "open", ...archivedArgs(config)]);
   return dedupe(authored.map((p) => toPullRequest(p, "authored")));
 }
@@ -160,12 +160,13 @@ export async function getReviewList(options: GetReviewListOptions = {}): Promise
     cacheKey,
     ttl,
     async () => {
-      const [minePrs, authoredPrs] = await Promise.all([
-        fetchMine(login, config),
-        fetchAuthored(login, config),
+      const [minePrs, authoredPrs] = await Promise.all([fetchMine(config), fetchAuthored(config)]);
+      const [enrichedMine, enrichedAuthored] = await Promise.all([
+        enrich(login, minePrs),
+        enrich(login, authoredPrs),
       ]);
-      const mine = sortByNumber(await enrich(login, minePrs));
-      const authored = sortByNumber(await enrich(login, authoredPrs));
+      const mine = sortByNumber(enrichedMine);
+      const authored = sortByNumber(enrichedAuthored);
 
       const excludeKeys = new Set([
         ...mine.map((pr) => `${pr.repository}#${pr.number}`),

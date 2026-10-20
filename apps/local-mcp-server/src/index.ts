@@ -26,11 +26,16 @@ for (const tool of allTools) {
       description: tool.description,
       inputSchema: tool.inputSchema.shape,
     },
-    async (args: any) => {
+    async (args: Record<string, unknown>) => {
       const start = performance.now();
       logger.toolCall(tool.name, args);
       try {
-        const result = await tool.handler(args, sandbox);
+        // `allTools` is a heterogeneous array of `ToolDefinition<Schema>` for different per-tool
+        // Zod schemas, so there's no single precise static type for `args` here — the MCP SDK has
+        // already validated `args` against `tool.inputSchema` before invoking this callback, so
+        // this cast reflects a runtime guarantee the SDK itself provides, not an unchecked escape
+        // hatch like a bare `any` would be.
+        const result = await tool.handler(args as never, sandbox);
         logger.toolResult(tool.name, args, Math.round(performance.now() - start), result);
         return {
           content: [{ type: "text" as const, text: result }],

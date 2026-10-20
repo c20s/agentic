@@ -81,7 +81,12 @@ async function getBrowser(): Promise<import("playwright-core").Browser> {
             "--disable-notifications",
             "--no-first-run",
             "--mute-audio",
-            "--js-flags=--noexpose_wasm", // reduce WASM-based exploit/fingerprint surface
+            // V8 flag: disables the WebAssembly global/API surface entirely for pages rendered
+            // here. We don't need WASM for text extraction, and it's a common vector for both
+            // sandbox-escape exploits (WASM JIT bugs) and browser/device fingerprinting, so the
+            // safest default is to remove the API rather than trust every page not to use it.
+            // See https://v8.dev/docs/flags (a V8 flag, not Chromium-specific).
+            "--js-flags=--noexpose_wasm",
           ],
           // Never persist a profile/cache to disk across launches.
           handleSIGINT: false,

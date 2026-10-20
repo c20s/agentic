@@ -24,6 +24,23 @@ function commentIcon(pr: EnrichedPullRequest): string {
   return color(DIM, "—");
 }
 
+// Unicode code point ranges for the emoji this table actually renders (💬, ✓, ✗, ◷, —, ⭐-style
+// icons), each displayed as 2 terminal columns wide. Not a general-purpose emoji-width table —
+// just enough to cover this file's fixed icon set:
+//   0x1F300–0x1FAFF  Miscellaneous Symbols & Pictographs, Emoticons, Transport, Supplemental
+//                     Symbols & Pictographs (covers 💬)
+//   0x2600–0x27BF    Miscellaneous Symbols & Dingbats (covers ✓ ✗ ◷)
+//   0x2B50           STAR (⭐), kept as its own case since it falls outside both ranges above
+const WIDE_EMOJI_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x1f300, 0x1faff],
+  [0x2600, 0x27bf],
+  [0x2b50, 0x2b50],
+];
+
+function isWideEmoji(codePoint: number): boolean {
+  return WIDE_EMOJI_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end);
+}
+
 /** Visible width of a string, treating common emoji as width 2 (good enough for our fixed icon set). */
 function displayWidth(text: string): number {
   // Strip ANSI SGR color codes and OSC-8 hyperlink escapes (`\x1b]8;;url\x1b\`...`\x1b]8;;\x1b\`)
@@ -33,9 +50,7 @@ function displayWidth(text: string): number {
   let width = 0;
   for (const ch of stripped) {
     const code = ch.codePointAt(0) ?? 0;
-    const isWide =
-      (code >= 0x1f300 && code <= 0x1faff) || (code >= 0x2600 && code <= 0x27bf) || code === 0x2b50;
-    width += isWide ? 2 : 1;
+    width += isWideEmoji(code) ? 2 : 1;
   }
   return width;
 }
@@ -68,15 +83,22 @@ interface Column {
   get: (pr: EnrichedPullRequest) => string;
 }
 
+// Column width tuning: each column gets a MIN width (so headers/short values don't look cramped)
+// and, for the free-text ones, a MAX width (so one long repo name/title/author doesn't blow out
+// the whole table) — the actual width used is clamped between the two, based on the widest value
+// actually present in `prs`.
+const MIN_PR_LABEL_WIDTH = 6; // fits "#12345" comfortably
+const MIN_REPO_WIDTH = 4;
+const MAX_REPO_WIDTH = 30;
+const MIN_AUTHOR_WIDTH = 6;
+const MAX_AUTHOR_WIDTH = 16;
+const DATE_WIDTH = 10; // fixed: "YYYY-MM-DD"
+const TITLE_WIDTH = 50;
+
 function buildColumns(prs: EnrichedPullRequest[], mode: "team" | "mine"): Column[] {
-  const prLabelWidth = Math.max(
-    6,
-    ...prs.map((pr) => displayWidth(`#${pr.number}`))
-  );
-  const repoWidth = Math.max(4, ...prs.map((pr) => displayWidth(pr.repository)), 20);
-  const authorWidth = Math.max(6, ...prs.map((pr) => displayWidth(pr.author)));
-  const dateWidth = 10;
-  const titleWidth = 50;
+  const prLabelWidth = Math.max(MIN_PR_LABEL_WIDTH, ...prs.map((pr) => displayWidth(`#${pr.number}`)));
+  const repoWidth = Math.max(MIN_REPO_WIDTH, ...prs.map((pr) => displayWidth(pr.repository)), MAX_REPO_WIDTH);
+  const authorWidth = Math.max(MIN_AUTHOR_WIDTH, ...prs.map((pr) => displayWidth(pr.author)));
 
   const cols: Column[] = [
     { header: " ", width: 1, get: approvedIcon },
@@ -86,14 +108,22 @@ function buildColumns(prs: EnrichedPullRequest[], mode: "team" | "mine"): Column
       width: prLabelWidth,
       get: (pr) => hyperlink(pr.url, `#${pr.number}`),
     },
-    { header: "Repository", width: Math.min(repoWidth, 30), get: (pr) => truncate(pr.repository, 30) },
+    {
+      header: "Repository",
+      width: Math.min(repoWidth, MAX_REPO_WIDTH),
+      get: (pr) => truncate(pr.repository, MAX_REPO_WIDTH),
+    },
   ];
   if (mode === "team") {
-    cols.push({ header: "Author", width: Math.min(authorWidth, 16), get: (pr) => truncate(pr.author, 16) });
+    cols.push({
+      header: "Author",
+      width: Math.min(authorWidth, MAX_AUTHOR_WIDTH),
+      get: (pr) => truncate(pr.author, MAX_AUTHOR_WIDTH),
+    });
   }
   cols.push(
-    { header: "Created", width: dateWidth, get: (pr) => pr.createdAt.slice(0, 10) },
-    { header: "Title", width: titleWidth, get: (pr) => truncate(pr.title, titleWidth) }
+    { header: "Created", width: DATE_WIDTH, get: (pr) => pr.createdAt.slice(0, 10) },
+    { header: "Title", width: TITLE_WIDTH, get: (pr) => truncate(pr.title, TITLE_WIDTH) }
   );
   return cols;
 }

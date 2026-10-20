@@ -34,12 +34,12 @@ const installHook = async (repoRoot: string): Promise<string> => {
     if (existing.isSymbolicLink()) {
       await unlink(hookPath);
     } else {
-      return `skippad (befintlig icke-symlänk hook): ${hookPath}`;
+      return `skipped (existing non-symlink hook): ${hookPath}`;
     }
   }
 
   await symlink(HOOK_SOURCE, hookPath);
-  return `installerad: ${hookPath}`;
+  return `installed: ${hookPath}`;
 };
 
 const main = async () => {
@@ -47,7 +47,7 @@ const main = async () => {
   const repoRoots = await findRepoRoots(root);
 
   if (repoRoots.length === 0) {
-    console.log(`Inga repon hittades under ${root}`);
+    console.log(`No repos found under ${root}`);
     return;
   }
 

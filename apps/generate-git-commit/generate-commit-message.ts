@@ -23,6 +23,49 @@ const readMode = async (): Promise<Mode> => {
   }
 };
 
+interface StreamJsonEvent {
+  type?: string;
+  event?: {
+    type?: string;
+    delta?: { text?: string };
+  };
+}
+
+function isStreamJsonEvent(value: unknown): value is StreamJsonEvent {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Reads Claude's `--output-format stream-json` stdout, echoing each text delta to stderr as it
+ * arrives (so the user sees live progress) and returns the full assembled message text.
+ */
+async function consumeStreamJsonText(stdout: ReadableStream<Uint8Array>): Promise<string> {
+  let message = "";
+  let buffer = "";
+  for await (const chunk of stdout) {
+    buffer += Buffer.from(chunk).toString("utf8");
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!isStreamJsonEvent(event)) continue;
+      if (event.type === "stream_event" && event.event?.type === "content_block_delta") {
+        const delta = event.event.delta?.text ?? "";
+        message += delta;
+        process.stderr.write(delta);
+      }
+    }
+  }
+  process.stderr.write("\n");
+  return message;
+}
+
 const buildPrompt = (filePaths: string, diff: string): string =>
   `Generate a git commit message in Conventional Commits format (type(scope): summary).
 Infer the type (feat, fix, chore, refactor, docs, test, style, perf, build, ci) and scope from the changed file paths and the diff content below.
@@ -71,10 +114,9 @@ const main = async () => {
     if (tty) {
       const ttyStream = tty.createReadStream();
       const rl = createInterface({ input: ttyStream, output: tty.createWriteStream() });
-      const answer = await rl.question("Generera commit-meddelande med Claude? [Y/n] ");
+      const answer = await rl.question("Generate commit message with Claude? [Y/n] ");
       rl.close();
       ttyStream.destroy();
-      //await tty.close();
       if (answer.trim().toLowerCase().startsWith("n")) {
         process.exit(0);
       }
@@ -101,42 +143,16 @@ const main = async () => {
     { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
   );
 
-  process.stderr.write("Claude genererar commit-meddelande...\n");
-
-  const consumeStdout = async (): Promise<string> => {
-    let message = "";
-    let buffer = "";
-    for await (const chunk of claudeProc.stdout) {
-      buffer += Buffer.from(chunk).toString("utf8");
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        let event: any;
-        try {
-          event = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if (event.type === "stream_event" && event.event?.type === "content_block_delta") {
-          const delta = event.event.delta?.text ?? "";
-          message += delta;
-          process.stderr.write(delta);
-        }
-      }
-    }
-    process.stderr.write("\n");
-    return message;
-  };
+  process.stderr.write("Claude is generating a commit message...\n");
 
   const [message, errOutput, exitCode] = await Promise.all([
-    consumeStdout(),
+    consumeStreamJsonText(claudeProc.stdout),
     new Response(claudeProc.stderr).text(),
     claudeProc.exited,
   ]);
 
   if (exitCode !== 0 || !message.trim()) {
-    console.error(`generate-commit-message: claude misslyckades (${exitCode}): ${errOutput}`);
+    console.error(`generate-commit-message: claude failed (${exitCode}): ${errOutput}`);
     process.exit(0);
   }
 
