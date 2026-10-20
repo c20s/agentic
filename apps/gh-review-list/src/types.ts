@@ -45,6 +45,8 @@ export interface Config {
   repos: string[];
   /** Individual GitHub logins whose PRs should always be included, in addition to team members. */
   extraAuthors: string[];
+  /** Include PRs from archived repositories. Default false — archived repos are filtered out. */
+  includeArchived: boolean;
   /** Cache time-to-live in seconds. 0 disables caching. */
   cacheTtlSeconds: number;
 }
@@ -54,5 +56,6 @@ export const DEFAULT_CONFIG: Config = {
   extraSearchQueries: [],
   repos: [],
   extraAuthors: [],
+  includeArchived: false,
   cacheTtlSeconds: 120,
 };

@@ -8,7 +8,7 @@ export * from "./types";
 
 /** Bump whenever ReviewListResult's shape changes, so stale on-disk cache entries from an older
  *  version are treated as a miss instead of being handed back as-is and breaking downstream code. */
-const CACHE_SCHEMA_VERSION = 2;
+const CACHE_SCHEMA_VERSION = 3;
 
 export interface GetReviewListOptions {
   /** Path to the config file. Defaults to ~/.config/c20s/prs.json. */
@@ -99,10 +99,16 @@ function sortByAuthor(prs: EnrichedPullRequest[]): EnrichedPullRequest[] {
   return [...prs].sort((a, b) => a.author.localeCompare(b.author) || a.number - b.number);
 }
 
-async function fetchMine(login: string): Promise<PullRequest[]> {
+/** `--archived=false` unless the config opts into including archived repos' PRs. */
+function archivedArgs(config: Config): string[] {
+  return config.includeArchived ? [] : ["--archived=false"];
+}
+
+async function fetchMine(login: string, config: Config): Promise<PullRequest[]> {
+  const archived = archivedArgs(config);
   const [assigned, reviewRequested] = await Promise.all([
-    gh.searchPrs(["--assignee", "@me", "--state", "open"]),
-    gh.searchPrs(["--review-requested", "@me", "--state", "open"]),
+    gh.searchPrs(["--assignee", "@me", "--state", "open", ...archived]),
+    gh.searchPrs(["--review-requested", "@me", "--state", "open", ...archived]),
   ]);
   return dedupe([
     ...assigned.map((p) => toPullRequest(p, "assigned")),
@@ -110,8 +116,8 @@ async function fetchMine(login: string): Promise<PullRequest[]> {
   ]);
 }
 
-async function fetchAuthored(login: string): Promise<PullRequest[]> {
-  const authored = await gh.searchPrs(["--author", "@me", "--state", "open"]);
+async function fetchAuthored(login: string, config: Config): Promise<PullRequest[]> {
+  const authored = await gh.searchPrs(["--author", "@me", "--state", "open", ...archivedArgs(config)]);
   return dedupe(authored.map((p) => toPullRequest(p, "authored")));
 }
 
@@ -126,11 +132,12 @@ async function fetchTeam(config: Config, excludeLogins: Set<string>): Promise<Pu
   const authors = new Set([...memberLists.flat(), ...config.extraAuthors]);
 
   const repoArgs = config.repos.flatMap((r) => ["--repo", r]);
+  const archived = archivedArgs(config);
   const authorSearches = [...authors].map((author) =>
-    gh.searchPrs(["--author", author, "--state", "open", ...repoArgs])
+    gh.searchPrs(["--author", author, "--state", "open", ...repoArgs, ...archived])
   );
   const extraSearches = config.extraSearchQueries.map((q) =>
-    gh.searchPrs([...q.split(" ").filter(Boolean), "--state", "open", ...repoArgs])
+    gh.searchPrs([...q.split(" ").filter(Boolean), "--state", "open", ...repoArgs, ...archived])
   );
 
   const results = await Promise.all([...authorSearches, ...extraSearches]);
@@ -153,7 +160,10 @@ export async function getReviewList(options: GetReviewListOptions = {}): Promise
     cacheKey,
     ttl,
     async () => {
-      const [minePrs, authoredPrs] = await Promise.all([fetchMine(login), fetchAuthored(login)]);
+      const [minePrs, authoredPrs] = await Promise.all([
+        fetchMine(login, config),
+        fetchAuthored(login, config),
+      ]);
       const mine = sortByNumber(await enrich(login, minePrs));
       const authored = sortByNumber(await enrich(login, authoredPrs));
 

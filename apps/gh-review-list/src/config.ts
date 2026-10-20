@@ -47,6 +47,8 @@ export async function loadConfig(path: string = CONFIG_PATH): Promise<Config> {
     extraSearchQueries: asStringArray(obj.extraSearchQueries, "extraSearchQueries"),
     repos: asStringArray(obj.repos, "repos"),
     extraAuthors: asStringArray(obj.extraAuthors, "extraAuthors"),
+    includeArchived:
+      typeof obj.includeArchived === "boolean" ? obj.includeArchived : DEFAULT_CONFIG.includeArchived,
     cacheTtlSeconds:
       typeof obj.cacheTtlSeconds === "number" ? obj.cacheTtlSeconds : DEFAULT_CONFIG.cacheTtlSeconds,
   };

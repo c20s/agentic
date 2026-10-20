@@ -29,6 +29,7 @@ All fields are optional; missing file = defaults (no team, no caching beyond 120
   "extraAuthors": ["someone-not-on-the-team"],
   "extraSearchQueries": ["label:needs-review"],
   "repos": ["my-org/my-repo"],
+  "includeArchived": false,
   "cacheTtlSeconds": 120
 }
 ```
@@ -38,6 +39,8 @@ All fields are optional; missing file = defaults (no team, no caching beyond 120
 - `extraSearchQueries`: raw extra arguments appended to `gh search prs` (e.g. `"label:needs-review"`),
   run as additional searches and merged in.
 - `repos`: restricts the team/author searches to these repos. Empty = unrestricted.
+- `includeArchived`: set `true` to include PRs from archived repositories. Defaults to `false`, i.e.
+  every search is run with `--archived=false` so PRs sitting in archived repos never clutter the list.
 - `cacheTtlSeconds`: how long a fetch is cached on disk before being considered stale. `0` disables caching.
 
 ## Caching
