@@ -37,7 +37,10 @@ Read-only (context):
   **outline** (title + headings) is returned by default instead of the whole
   page — see "Outline mode for `web_fetch`" below. Single-page apps are
   handled by optionally rendering the page with a real headless browser
-  first — see "Rendering single-page apps (`render`)" below.
+  first — see "Rendering single-page apps (`render`)" below. **Not** for
+  GitHub PR links (`.../pull/123`) — use `review_context({ mode: "pr" })`
+  instead, since scraping the PR's web page never gets you the actual diff
+  anyway; both tools' descriptions cross-reference this.
 - `web_search` – search the web (backed by DuckDuckGo's no-JS HTML results
   page, so no API key is needed) and return a list of `{ title, url,
   snippet }` results. Pair with `web_fetch` to read a specific result.
@@ -50,18 +53,50 @@ Read-only (context):
   instead of the rendered table. Also available standalone as `pnpm run prs`
   — see `apps/gh-review-list/README.md`.
 - `review_context` – builds the best available context for reviewing a change,
-  in one call, from one of five sources (`mode`):
+  in one call, from one of five sources (`mode`). **For any `github.com
+  .../pull/123` link, always use `mode: "pr"` here, never `web_fetch`/
+  `web_search`** — the PR's rendered web page never contains its actual
+  diff, only `gh` (which this mode uses) does; both tools' descriptions say
+  so explicitly so this should happen automatically, but it's worth knowing
+  if you're deciding between them by hand too.
   - `"changes"` – everything uncommitted in the sandboxed project right now
     (tracked edits + staged + untracked new files) vs `HEAD`.
   - `"commit"` – one commit's diff vs its parent, plus its commit message
     (needs `commit`, a SHA or ref).
-  - `"pr"` – a GitHub pull request's full diff, description, and every
-    existing comment (both conversation and inline review comments), fetched
-    via the `gh` CLI (needs `prUrl`; `gh` must be installed & authenticated).
-  - `"branch"` – a branch's diff vs its base, plus every commit in between
-    and their messages (needs `branch`, optional `baseRef`, default `main`).
+  - `"pr"` – a GitHub pull request's description and every existing comment
+    (both conversation and inline review comments), fetched via the `gh` CLI
+    (needs `prUrl`; `gh` must be installed & authenticated), plus a
+    stat-only changed-files summary.
+  - `"branch"` – every commit between a branch and its base and their
+    messages (needs `branch`, optional `baseRef`, default `main`), plus the
+    same kind of stat-only changed-files summary.
   - `"files"` – the full current content of an explicit file list, absolute
     or sandbox-relative, no git history involved (needs `files`).
+
+  `"pr"` and `"branch"` diffs can be arbitrarily large (a whole feature
+  branch), so instead of inlining the full diff text — which for big PRs
+  used to blow past the response size limit and make clients like Claude
+  Code spill the oversized response to a file outside the sandbox — those
+  two modes check the actual ref out on disk and return that checkout's path
+  instead:
+  - `"branch"` gets a real **`git worktree`** off the sandboxed project's own
+    repo — cheap, shares its object store, no second clone. (`branch` is
+    just a ref name, so it's always assumed to belong to that repo.)
+  - `"pr"` is always assumed **possibly unrelated** to whatever repo the
+    sandbox happens to be pointed at — it's never diffed against the
+    sandboxed repo's object store. Instead `owner/repo` (parsed straight out
+    of the PR URL) is cloned fresh via `gh repo clone` and its head checked
+    out via `gh pr checkout`, both going through `gh`'s own stored
+    authentication — so this works for PRs on private repos and from forks
+    alike, not just whatever the sandbox itself happens to have access to.
+
+  Either way the checkout lands at
+  `~/.config/c20s/reviews/<branch-or-pr-head>[-<pr-number>]` (reused across
+  calls, refreshed in place each time, never auto-deleted — same philosophy
+  as `~/.trash`, see "Limitations" below). The agent is expected to run `git
+  diff`/read files directly against that path with its own tools from
+  there — it's deliberately outside this server's sandbox root, so none of
+  `read_file`/`search_files`/etc. reach it.
 
   Optionally pass `skill` with the name of a skill from `.apm/skills` (see
   `get_context({ symbol: "skills" })` below) to append that skill's full
@@ -630,6 +665,16 @@ blocked explicitly with `--disallowedTools`.
   folder itself never shows up inside the project. Nothing ever prunes
   `~/.trash` automatically — that's left to a human, on purpose, rather
   than silently expiring "deleted" data on a timer.
+- `review_context`'s `"pr"`/`"branch"` modes similarly write outside the
+  sandbox: checkouts (a `git worktree` for `"branch"`, a standalone `gh repo
+  clone` for `"pr"`) live under `~/.config/c20s/reviews/...` (see
+  `REVIEWS_ROOT` in `src/review.ts`) and are reused/refreshed in place on
+  each call rather than being recreated or cleaned up automatically — again
+  left to a human to prune if disk space matters. `"pr"`'s clone/checkout
+  goes through `gh repo clone`/`gh pr checkout`, i.e. `gh`'s own stored
+  authentication, so it works for private repos and fork PRs the same as
+  every other `gh`-backed call in this file (`gh` must be installed &
+  authenticated).
 - `search_files` requires `ripgrep` (`rg`) installed on the system and on
   `PATH`. The server runs `rg` as a subprocess (`Bun.spawn`) with `--json`
   for robust result parsing. The path (`path` argument) is validated and

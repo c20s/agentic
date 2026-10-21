@@ -278,8 +278,9 @@ export const webFetchTool: ToolDefinition<typeof webFetchSchema> = {
   name: "web_fetch",
   description:
     "Fetch a URL (GET only, read-only). HTML -> markdown, default OUTLINE (headings only). Use 'section' " +
-    "for one part, 'full'/'raw' for more. SPAs auto-render via headless browser if needed. " +
-    "Call tool_help('web_fetch') before first use.",
+    "for one part, 'full'/'raw' for more. SPAs auto-render via headless browser if needed. For a GitHub " +
+    "PR link (.../pull/123), use review_context({ mode: 'pr' }) instead — not this — it gets the actual " +
+    "diff via 'gh', which this tool cannot. Call tool_help('web_fetch') before first use.",
   inputSchema: webFetchSchema,
   handler: async ({ url, full, section, raw, render }) => {
     const safeUrl = assertSafeUrl(url);

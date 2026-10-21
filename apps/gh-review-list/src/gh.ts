@@ -78,7 +78,7 @@ type ReviewDecisionValue = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" 
 function isReviewDecisionResponse(value: unknown): value is { reviewDecision: ReviewDecisionValue } {
   if (!isRecord(value)) return false;
   const d = value.reviewDecision;
-  return d === null || d === undefined || (typeof d === "string" && REVIEW_DECISIONS.has(d));
+  return d === null || d === undefined || d === "" || (typeof d === "string" && REVIEW_DECISIONS.has(d));
 }
 
 export async function viewPrReviewDecision(repo: string, number: number): Promise<ReviewDecisionValue> {

@@ -30,7 +30,18 @@ Always do these steps in order, for each changed file:
 3. **Reconcile.** Using what you learned in step 2:
    - Update or remove any diff-pass comment that no longer holds once you saw the full file/usage/repo patterns (e.g. a "why is this duplicated" question that step 2 shows is actually consistent with 3 other call sites — drop it, or turn it into a question about the shared pattern instead).
    - Add new comments you could only make with full-file and repo-pattern knowledge: inconsistencies with existing patterns, outdated idioms, missed standard-library features, better abstractions available in this language/runtime, concurrency or security issues only visible with full context.
+   - Drop anything left that isn't earning its place (see "Only comment when it's worth it" below) — don't carry a weak diff-pass comment through to the output just because you already wrote it.
 4. Only after both passes are reconciled, output the final comment list — never show the diff-pass draft and the reconciled version both; the draft is working memory, not output.
+
+## Only comment when it's worth it
+
+A review with ten comments where three matter is worse than one with three — it trains the reader to skim past all of them. Default to silence; every comment must earn its place:
+
+ ⁃ Skip anything where the fix wouldn't noticeably change correctness, safety, readability, or maintainability — a theoretically-truer phrasing or a marginally-more-idiomatic one-liner with no real downside the way it's written isn't worth a comment.
+ ⁃ Skip restating what the diff/commit message/PR description already says plainly, and skip narrating what the code obviously does.
+ ⁃ Skip edge cases so unlikely or so clearly out of scope (test fixtures, scripts, generated code, a known prototype) that raising them would be pedantry, not review.
+ ⁃ Never pad with a `praise` comment to soften a review that otherwise has few or no issues — an empty or short comment list is a legitimate, good outcome. Only praise something genuinely notable (a real footgun avoided, a non-obvious good call), not as a courtesy.
+ ⁃ If, after steps 1–3, you don't have a genuine issue/suggestion/question, say so in one line instead of manufacturing comments to look thorough.
 
 ## Language knowledge
 

@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ToolDefinition } from "./tools";
 import type { Sandbox } from "./sandbox";
 import { loadApmSkills } from "./context";
@@ -10,22 +13,131 @@ import { loadApmSkills } from "./context";
  * skill (see `context.ts` — the same skills `get_context({ symbol: "skills" })`
  * lists). Five independent sources of "what changed":
  *
- * - `changes` — full diff of everything uncommitted (tracked edits + staged +
- *   untracked new files) vs HEAD in the sandboxed project.
- * - `commit`  — full diff of one commit vs its parent, plus that commit's
- *   message (its "description").
- * - `pr`      — full diff of a GitHub PR plus its description and every
- *   existing comment (both inline review comments and conversation
- *   comments), via the `gh` CLI.
- * - `branch`  — full diff of one branch vs its base, plus every commit in
- *   between and their messages ("comments" in the git sense).
- * - `files`   — the full content of an explicit list of files (absolute or
- *   sandbox-relative), no git history involved.
+ * - `changes` — full diff of everything uncommitted vs HEAD in the sandboxed project.
+ * - `commit`  — full diff of one commit vs its parent, plus its message.
+ * - `pr`      — a GitHub PR's description and comments via `gh`, plus a
+ *   fresh `gh repo clone`/`gh pr checkout` of its repo (assumed unrelated
+ *   to the sandboxed project) and a stat-only file-change summary.
+ * - `branch`  — commits between a branch and its base, plus a `git worktree`
+ *   checkout of that branch (assumed to belong to the sandboxed repo) and a
+ *   stat-only file-change summary.
+ * - `files`   — the full content of an explicit list of files, no git history.
  *
- * All five render to the same `### file (status, +N -M)` / fenced-diff text
- * shape (see `renderDiffAsText`) so the rest of this tool, and whatever reads
- * its output, doesn't need to care which mode produced it.
+ * `changes`/`commit`/`files` render full diffs inline (see `renderDiffAsText`).
+ * `pr`/`branch` return a checkout path instead — their diffs can be too
+ * large to inline — under `renderCheckoutSummary`/`REVIEWS_ROOT`.
  */
+
+const REVIEWS_ROOT = join(homedir(), ".config", "c20s", "reviews");
+
+function slugify(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "ref";
+}
+
+function remoteMatchesRepo(remoteUrl: string, owner: string, repo: string): boolean {
+  const match = remoteUrl.trim().match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/i);
+  if (!match) return false;
+  const [, matchedOwner, matchedRepo] = match;
+  return matchedOwner?.toLowerCase() === owner.toLowerCase() && matchedRepo?.toLowerCase() === repo.toLowerCase();
+}
+
+async function createWorktree(
+  cwd: string,
+  ref: string,
+  label: string
+): Promise<{ path: string; error?: string }> {
+  await mkdir(REVIEWS_ROOT, { recursive: true });
+  const path = join(REVIEWS_ROOT, slugify(label));
+
+  if (existsSync(path)) {
+    const list = await runGit(["worktree", "list", "--porcelain"], cwd);
+    const isKnownWorktree = list.stdout.split("\n").some((line) => line === `worktree ${path}`);
+    if (isKnownWorktree) {
+      const checkout = await runGit(["checkout", "--detach", "--force", ref], path);
+      if (checkout.exitCode !== 0) {
+        return { path, error: `git checkout ${ref} failed in existing worktree: ${checkout.stderr.trim()}` };
+      }
+      const reset = await runGit(["reset", "--hard", ref], path);
+      if (reset.exitCode !== 0) {
+        return { path, error: `git reset --hard ${ref} failed in existing worktree: ${reset.stderr.trim()}` };
+      }
+      return { path };
+    }
+    return {
+      path,
+      error: `${path} already exists and isn't a worktree of this repo. Remove it manually (or pick a different branch/PR) and retry.`,
+    };
+  }
+
+  const add = await runGit(["worktree", "add", "--detach", "--force", path, ref], cwd);
+  if (add.exitCode !== 0) {
+    return { path, error: `git worktree add failed: ${add.stderr.trim() || `exit code ${add.exitCode}`}` };
+  }
+  return { path };
+}
+
+async function clonePr(pr: { owner: string; repo: string; number: number; label: string }): Promise<{ path: string; error?: string }> {
+  const { owner, repo, number, label } = pr;
+  await mkdir(REVIEWS_ROOT, { recursive: true });
+  const path = join(REVIEWS_ROOT, slugify(label));
+  const repoSlug = `${owner}/${repo}`;
+
+  if (!existsSync(path)) {
+    const clone = await runGh(["repo", "clone", repoSlug, path]);
+    if (clone.exitCode !== 0) {
+      await rm(path, { recursive: true, force: true });
+      return { path, error: `gh repo clone ${repoSlug} failed: ${clone.stderr.trim() || `exit code ${clone.exitCode}`}` };
+    }
+  } else {
+    const remote = await runGit(["remote", "get-url", "origin"], path);
+    if (remote.exitCode !== 0 || !remoteMatchesRepo(remote.stdout, owner, repo)) {
+      return {
+        path,
+        error: `${path} already exists and isn't a clone of ${repoSlug}. Remove it manually (or pick a different PR) and retry.`,
+      };
+    }
+  }
+
+  const checkout = await runCommand("gh", ["pr", "checkout", String(number), "--force"], { cwd: path });
+  if (checkout.exitCode !== 0) {
+    return { path, error: `gh pr checkout ${number} failed: ${checkout.stderr.trim() || `exit code ${checkout.exitCode}`}` };
+  }
+  return { path };
+}
+
+function renderDiffStat(diffs: FileDiff[]): string {
+  if (diffs.length === 0) return "(no changed files)";
+  return diffs
+    .map((d) => {
+      const rename = d.renamedFrom ? ` (was ${d.renamedFrom})` : "";
+      return `- ${d.file}${rename} — ${d.status}, +${d.additions} -${d.deletions}`;
+    })
+    .join("\n");
+}
+
+async function renderCheckoutSummary(
+  cwd: string,
+  prefetch: [remote: string, ref: string] | undefined,
+  rangeArgs: DiffRangeArgs,
+  diffCommandHint: string
+): Promise<string> {
+  const instructions =
+    `Checked out at: ${cwd}\n` +
+    `Run \`git diff ${diffCommandHint}\` (or read files directly) from that path to see the actual changes — ` +
+    `it isn't under this sandbox's root, so use your own filesystem/shell tools there, not this server's sandboxed ones.\n`;
+
+  if (prefetch) {
+    const [remote, ref] = prefetch;
+    const fetch = await runGit(["fetch", remote, ref, "--force"], cwd);
+    if (fetch.exitCode !== 0) {
+      return `${instructions}(could not fetch ${ref} to compute a file-change summary: ${fetch.stderr.trim() || `exit code ${fetch.exitCode}`} — diff it manually from the checkout)\n`;
+    }
+  }
+
+  const changedFiles = await discoverChangedFiles(rangeArgs, cwd, false);
+  const stats = await getDiffStats(changedFiles, rangeArgs, cwd);
+  return `${instructions}Changed files (${changedFiles.length}):\n\n${renderDiffStat(stats)}\n`;
+}
 
 const MAX_INLINE_DIFF_LINES = 600;
 
@@ -238,6 +350,22 @@ async function getFileDiffMeta(file: string, rangeArgs: DiffRangeArgs, cwd: stri
   return { status, renamedFrom, additions, deletions, isBinary };
 }
 
+async function getDiffStats(files: string[], rangeArgs: DiffRangeArgs, cwd: string): Promise<FileDiff[]> {
+  return Promise.all(
+    files.map(async (file) => {
+      const meta = await getFileDiffMeta(file, rangeArgs, cwd);
+      return {
+        file,
+        status: meta.status,
+        renamedFrom: meta.renamedFrom,
+        additions: meta.additions,
+        deletions: meta.deletions,
+        hunks: [],
+      };
+    })
+  );
+}
+
 async function getWholeFileSnapshot(file: string, sandbox: Sandbox): Promise<FileDiff> {
   const abs = sandbox.resolve(file);
   let raw: string;
@@ -360,9 +488,13 @@ const reviewContextSchema = z.object({
     .describe(
       "What to build context for: 'changes' = everything uncommitted in the sandboxed project right now " +
         "(tracked edits + staged + untracked new files) vs HEAD. 'commit' = one commit's diff vs its parent, " +
-        "plus its commit message (needs 'commit'). 'pr' = a GitHub pull request's full diff, description, and " +
-        "every existing comment, fetched via the 'gh' CLI (needs 'prUrl'). 'branch' = a branch's diff vs its " +
-        "base, plus every commit in between and their messages (needs 'branch', optionally 'baseRef'). " +
+        "plus its commit message (needs 'commit'). 'pr' = a GitHub pull request's description, every existing " +
+        "comment, and a file-change summary, fetched via the 'gh' CLI (needs 'prUrl') — ALWAYS use this mode " +
+        "for a github.com '.../pull/123' link, never web_fetch/web_search (they can't see the actual diff). " +
+        "The PR's repo (assumed possibly unrelated to the sandboxed project) is cloned fresh via 'gh' and its " +
+        "head checked out on disk, and that clone's path is returned, since full PR diffs can be too large " +
+        "to inline. 'branch' = every commit between a branch and its base and their messages, plus the same " +
+        "kind of worktree + file-change summary (needs 'branch', optionally 'baseRef'). " +
         "'files' = the full current content of an explicit file list, no git history involved (needs 'files')."
     ),
   commit: z.string().optional().describe("Commit SHA or ref, required when mode is 'commit' (e.g. 'a1b2c3d' or 'HEAD~2')."),
@@ -468,16 +600,17 @@ async function handleBranchMode(
   if (changedFiles.length === 0) {
     return `No changes between ${base} and ${branch}.`;
   }
-  const diffs = await Promise.all(
-    changedFiles.map((file) => getFileDiff(file, rangeArgs, sandbox, { treatUntrackedAsAdded: false }))
-  );
   const log = await runGit(["log", "--pretty=format:- %h %s (%an)", `${base}..${branch}`], sandbox.root);
   if (log.exitCode !== 0) {
     return `Error: could not list commits between ${base} and ${branch}: ${log.stderr.trim() || `exit code ${log.exitCode}`}`;
   }
-  const body =
-    `Commits in ${branch} not in ${base}:\n\n${log.stdout.trim() || "(none)"}\n\n` +
-    `${diffs.map(renderDiffAsText).join("\n")}`;
+
+  const worktree = await createWorktree(sandbox.root, branch, branch);
+  const checkoutSection = worktree.error
+    ? `Checkout: could not create one — ${worktree.error}\n`
+    : await renderCheckoutSummary(worktree.path, undefined, rangeArgs, `${base}...${branch}`);
+
+  const body = `Commits in ${branch} not in ${base}:\n\n${log.stdout.trim() || "(none)"}\n\n${checkoutSection}`;
   return renderWithSkill(resolvedSkill, `Branch ${branch} vs ${base} (${changedFiles.length} file(s))`, body);
 }
 
@@ -495,13 +628,7 @@ async function handlePrMode(prUrl: string, resolvedSkill: ReturnType<typeof reso
   const { owner, repo, number } = parsePrUrl(prUrl);
   const repoSlug = `${owner}/${repo}`;
 
-  const [diffResult, viewResult] = await Promise.all([
-    runGh(["pr", "diff", prUrl]),
-    runGh(["pr", "view", prUrl, "--json", "title,body,author,url,baseRefName,headRefName"]),
-  ]);
-  if (diffResult.exitCode !== 0) {
-    return `Error: gh pr diff failed: ${diffResult.stderr.trim() || `exit code ${diffResult.exitCode}`}. Is 'gh' installed and authenticated?`;
-  }
+  const viewResult = await runGh(["pr", "view", prUrl, "--json", "title,body,author,url,baseRefName,headRefName"]);
 
   let pr: GhPrView;
   try {
@@ -537,11 +664,22 @@ async function handlePrMode(prUrl: string, resolvedSkill: ReturnType<typeof reso
     }))
   );
 
+  const label = `${slugify(pr.headRefName)}-${number}`;
+  const clone = await clonePr({ owner, repo, number, label });
+  const checkoutSection = clone.error
+    ? `Checkout: could not create one — ${clone.error}\n`
+    : await renderCheckoutSummary(
+        clone.path,
+        ["origin", pr.baseRefName],
+        ["FETCH_HEAD...HEAD"],
+        `origin/${pr.baseRefName}...HEAD`
+      );
+
   const body =
     `**${pr.title}** by @${pr.author.login} — ${pr.headRefName} -> ${pr.baseRefName}\n${pr.url}\n\n` +
     `Description:\n\n${pr.body?.trim() || "(no description)"}\n\n` +
     `${conversationSection}\n${reviewSection}\n` +
-    `Diff:\n\n${diffResult.stdout}`;
+    `${checkoutSection}`;
 
   return renderWithSkill(resolvedSkill, `PR ${repoSlug}#${number}`, body);
 }
@@ -549,11 +687,16 @@ async function handlePrMode(prUrl: string, resolvedSkill: ReturnType<typeof reso
 export const reviewContextTool: ToolDefinition<typeof reviewContextSchema> = {
   name: "review_context",
   description:
-    "Builds the best available context for reviewing a change, in one call: 'changes' (everything " +
-    "uncommitted), 'commit' (one commit's diff + message), 'pr' (a GitHub PR's diff + description + " +
-    "comments), 'branch' (a branch vs its base, + every commit message in between), or 'files' (full " +
-    "content of an explicit file list). Optionally pass 'skill' (see get_context({ symbol: 'skills' })) " +
-    "to append that skill's full instructions to apply while reviewing.",
+    "Builds the best available context for reviewing a change, in one call. For ANY github.com PR link " +
+    "(.../pull/123), use mode 'pr' here — NOT web_fetch/web_search — it clones the PR's repo via 'gh' " +
+    "(works for private repos/forks too) instead of trying to scrape the PR's web page, which doesn't " +
+    "expose the actual diff anyway. Other modes: 'changes' (everything uncommitted), 'commit' (one " +
+    "commit's diff + message), 'branch' (a branch vs its base + every commit message in between, via a " +
+    "git worktree), 'files' (full content of an explicit file list). 'pr'/'branch' check the ref out on " +
+    "disk (path returned) and return a file-change summary instead of the full diff text, since PR/branch " +
+    "diffs can be too large to inline — read/diff that checked-out path directly with your own tools. " +
+    "Optionally pass 'skill' (see get_context({ symbol: 'skills' })) to append that skill's full " +
+    "instructions to apply while reviewing.",
   inputSchema: reviewContextSchema,
   handler: async (rawInput, sandbox) => {
     const input: ReviewContextInput = narrowReviewContextInput(rawInput);
