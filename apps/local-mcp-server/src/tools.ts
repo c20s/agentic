@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { readFile, writeFile, mkdir, readdir, stat, rename, cp, rm } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { Sandbox } from "./sandbox";
 import {
@@ -120,7 +120,7 @@ export const listDirTool: ToolDefinition<typeof listDirSchema> = {
       for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
         if (isIgnored(entry.name)) continue;
         const full = join(dir, entry.name);
-        const rel = relative(sandbox.root, full);
+        const rel = sandbox.toRelative(full);
         results.push(entry.isDirectory() ? `${rel}/` : rel);
         if (results.length >= MAX_LIST_ENTRIES) {
           results.push(`... (more than ${MAX_LIST_ENTRIES} results, truncated)`);
@@ -334,7 +334,7 @@ export const searchFilesTool: ToolDefinition<typeof searchFilesSchema> = {
       const filePath = event.data.path.text;
       const lineNumber = event.data.line_number;
       const lineText = event.data.lines.text.replace(/\n$/, "");
-      const rel = relative(sandbox.root, filePath);
+      const rel = sandbox.toRelative(filePath);
 
       matches.push(`${rel}:${lineNumber}: ${lineText.trim()}`);
       if (matches.length >= MAX_SEARCH_RESULTS) {
@@ -382,7 +382,7 @@ export const findFilesTool: ToolDefinition<typeof findFilesSchema> = {
     const files = stdout
       .split("\n")
       .filter((l) => l.trim().length > 0)
-      .map((f) => relative(sandbox.root, f))
+      .map((f) => sandbox.toRelative(f))
       .sort();
 
     if (files.length === 0) {

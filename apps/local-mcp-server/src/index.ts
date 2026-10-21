@@ -6,13 +6,19 @@ import { Sandbox } from "./sandbox";
 import { allTools } from "./tools";
 import { logger } from "./logger";
 import { closeBrowser } from "./browser";
+import { REVIEWS_ROOT } from "./review";
 
 /**
  * Sandbox root: where the agent is allowed to read/write.
  * Priority: first CLI argument > MCP_SANDBOX_ROOT env var > cwd.
+ *
+ * `REVIEWS_ROOT` is also allowed (read-only in practice, nothing writes there except
+ * `review_context`'s own `pr`/`branch` modes) so the worktrees/clones that tool checks out
+ * for a PR/branch review are actually reachable by `read_file`/`list_dir`/`search_files`/
+ * `find_files` — otherwise the agent has a path with nothing able to read it.
  */
 const rootArg = process.argv[2] ?? process.env.MCP_SANDBOX_ROOT ?? process.cwd();
-const sandbox = new Sandbox(resolve(rootArg));
+const sandbox = new Sandbox(resolve(rootArg), [REVIEWS_ROOT]);
 
 const server = new McpServer({
   name: "local-fs-mcp",
@@ -55,7 +61,9 @@ for (const tool of allTools) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  logger.info(`Started. Sandbox root: ${sandbox.root}. PID: ${process.pid}. Session: ${logger.sessionId}.`);
+  logger.info(
+    `Started. Sandbox root: ${sandbox.root} (+ ${sandbox.extraRoots.join(", ")}). PID: ${process.pid}. Session: ${logger.sessionId}.`
+  );
   if (logger.summaryPath) {
     logger.info(`Summary log: ${logger.summaryPath}`);
   }

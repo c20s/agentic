@@ -28,7 +28,7 @@ import { loadApmSkills } from "./context";
  * large to inline — under `renderCheckoutSummary`/`REVIEWS_ROOT`.
  */
 
-const REVIEWS_ROOT = join(homedir(), ".config", "c20s", "reviews");
+export const REVIEWS_ROOT = join(homedir(), ".config", "c20s", "reviews");
 
 function slugify(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "ref";
@@ -123,8 +123,8 @@ async function renderCheckoutSummary(
 ): Promise<string> {
   const instructions =
     `Checked out at: ${cwd}\n` +
-    `Run \`git diff ${diffCommandHint}\` (or read files directly) from that path to see the actual changes — ` +
-    `it isn't under this sandbox's root, so use your own filesystem/shell tools there, not this server's sandboxed ones.\n`;
+    `Read files or run \`git diff ${diffCommandHint}\` directly against that path (it's an allowed extra root, ` +
+    `so read_file/list_dir/search_files/find_files all work there too) to see the actual changes.\n`;
 
   if (prefetch) {
     const [remote, ref] = prefetch;
@@ -684,6 +684,95 @@ async function handlePrMode(prUrl: string, resolvedSkill: ReturnType<typeof reso
   return renderWithSkill(resolvedSkill, `PR ${repoSlug}#${number}`, body);
 }
 
+const GIT_RUN_ALLOWED_SUBCOMMANDS = new Set(["diff", "log", "show", "status", "blame", "rev-parse"]);
+
+// "branch"/"remote"/"worktree" have write-capable sub-actions (branch -D, remote add, worktree
+// add/remove) alongside read-only ones (branch --list, remote -v, worktree list) — only the
+// read-only second argument shown here is allowed for each, everything else is refused.
+const GIT_RUN_READONLY_SECOND_ARG: Record<string, Set<string>> = {
+  branch: new Set(["--list", "-l", "-a", "-r", "-v", "-vv"]),
+  remote: new Set(["-v", "show"]),
+  worktree: new Set(["list"]),
+};
+
+// Flags that write output to an arbitrary filesystem path instead of stdout — refused regardless
+// of subcommand, since this tool is read-only by design. Git's *global* `-C <dir>`/`--git-dir`/
+// `--work-tree` options (which would let args redirect git to operate outside the sandboxed
+// 'path', bypassing its check) only have meaning as args[0] before the subcommand — since args[0]
+// is always required to be one of the allowed subcommands/listing flags below, those are already
+// rejected without needing a special case here.
+const GIT_RUN_FORBIDDEN_FLAG_PATTERN = /^(-o|--output(-directory)?)(=.*)?$/;
+
+const MAX_GIT_RUN_OUTPUT_CHARS = 50_000;
+
+const gitRunSchema = z.object({
+  path: z
+    .string()
+    .describe(
+      "Directory to run git in — the sandbox root, a subdirectory of it, or a path returned by " +
+        "review_context's 'pr'/'branch' modes (its checkout is an allowed extra root)."
+    ),
+  args: z
+    .array(z.string())
+    .describe(
+      `Arguments to 'git', e.g. ["diff", "main...feature/x"] or ["log", "--oneline", "-10"]. ` +
+        `First element must be one of: ${[...GIT_RUN_ALLOWED_SUBCOMMANDS].join(", ")}, or "branch"/"remote"/` +
+        `"worktree" followed by a read-only listing flag (e.g. "branch", "--list").`
+    ),
+});
+
+function checkGitRunArgs(args: string[]): string | undefined {
+  const subcommand = args[0];
+  if (!subcommand) return "No git subcommand given.";
+
+  const forbiddenFlag = args.find((arg) => GIT_RUN_FORBIDDEN_FLAG_PATTERN.test(arg));
+  if (forbiddenFlag) {
+    return `"${forbiddenFlag}" writes output to a file instead of returning it — not allowed on a read-only tool.`;
+  }
+
+  if (GIT_RUN_ALLOWED_SUBCOMMANDS.has(subcommand)) return undefined;
+
+  const readonlySecondArgs = GIT_RUN_READONLY_SECOND_ARG[subcommand];
+  if (readonlySecondArgs) {
+    const secondArg = args[1];
+    if (secondArg && readonlySecondArgs.has(secondArg)) return undefined;
+    return (
+      `"git ${subcommand}" is only allowed with a read-only listing flag (${[...readonlySecondArgs].join(", ")}) ` +
+      `as its first argument — e.g. ["${subcommand}", "${[...readonlySecondArgs][0]}"].`
+    );
+  }
+
+  return (
+    `"${subcommand}" is not an allowed git subcommand. Allowed: ${[...GIT_RUN_ALLOWED_SUBCOMMANDS].join(", ")}, ` +
+    `or "branch"/"remote"/"worktree" with a read-only listing flag.`
+  );
+}
+
+export const gitRunTool: ToolDefinition<typeof gitRunSchema> = {
+  name: "git_run",
+  description:
+    "Runs a read-only 'git' subcommand (diff, log, show, status, blame, rev-parse, or branch/remote/" +
+    "worktree listing) in a directory — the sandbox root or a review_context 'pr'/'branch' checkout — and " +
+    "returns its output. Use this for ad hoc git inspection (e.g. `git diff <ref>...<ref>` on a specific " +
+    "file or path, `git log -p`, `git blame`) that review_context's fixed modes don't cover.",
+  inputSchema: gitRunSchema,
+  handler: async ({ path, args }, sandbox) => {
+    const cwd = sandbox.resolve(path);
+
+    const argsError = checkGitRunArgs(args);
+    if (argsError) throw new Error(argsError);
+
+    const { stdout, stderr, exitCode } = await runGit(args, cwd);
+    if (exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")} failed: ${stderr.trim() || `exit code ${exitCode}`}`);
+    }
+
+    const output = stdout || "(no output)";
+    if (output.length <= MAX_GIT_RUN_OUTPUT_CHARS) return output;
+    return `${output.slice(0, MAX_GIT_RUN_OUTPUT_CHARS)}\n\n... (truncated — narrow the command, e.g. add a path or -- <file>, and retry)`;
+  },
+};
+
 export const reviewContextTool: ToolDefinition<typeof reviewContextSchema> = {
   name: "review_context",
   description:
@@ -694,9 +783,10 @@ export const reviewContextTool: ToolDefinition<typeof reviewContextSchema> = {
     "commit's diff + message), 'branch' (a branch vs its base + every commit message in between, via a " +
     "git worktree), 'files' (full content of an explicit file list). 'pr'/'branch' check the ref out on " +
     "disk (path returned) and return a file-change summary instead of the full diff text, since PR/branch " +
-    "diffs can be too large to inline — read/diff that checked-out path directly with your own tools. " +
-    "Optionally pass 'skill' (see get_context({ symbol: 'skills' })) to append that skill's full " +
-    "instructions to apply while reviewing.",
+    "diffs can be too large to inline — read_file/list_dir/search_files/find_files and the git_run tool " +
+    "(for ad hoc `git diff`/`git log`/etc.) all work against that checked-out path too (it's an allowed " +
+    "extra root). Optionally pass 'skill' (see get_context({ symbol: 'skills' })) to append that skill's " +
+    "full instructions to apply while reviewing.",
   inputSchema: reviewContextSchema,
   handler: async (rawInput, sandbox) => {
     const input: ReviewContextInput = narrowReviewContextInput(rawInput);
@@ -717,4 +807,4 @@ export const reviewContextTool: ToolDefinition<typeof reviewContextSchema> = {
   },
 };
 
-export const reviewTools = [reviewContextTool];
+export const reviewTools = [reviewContextTool, gitRunTool];

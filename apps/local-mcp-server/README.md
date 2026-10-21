@@ -93,16 +93,27 @@ Read-only (context):
   Either way the checkout lands at
   `~/.config/c20s/reviews/<branch-or-pr-head>[-<pr-number>]` (reused across
   calls, refreshed in place each time, never auto-deleted — same philosophy
-  as `~/.trash`, see "Limitations" below). The agent is expected to run `git
-  diff`/read files directly against that path with its own tools from
-  there — it's deliberately outside this server's sandbox root, so none of
-  `read_file`/`search_files`/etc. reach it.
+  as `~/.trash`, see "Limitations" below). That directory is configured as
+  an **extra sandbox root** (see "Sandbox" below), so `read_file`/`list_dir`/
+  `search_files`/`find_files` all work directly against the returned path —
+  the agent isn't limited to `git diff`/shell tools of its own to inspect it.
 
   Optionally pass `skill` with the name of a skill from `.apm/skills` (see
   `get_context({ symbol: "skills" })` below) to append that skill's full
   instructions to the output, so the agent reviews the built context through
   that specific lens. Unknown skill names fail with the list of valid ones.
   See `src/review.ts`.
+- `git_run` – runs one read-only `git` subcommand (`diff`, `log`, `show`,
+  `status`, `blame`, `rev-parse`, or `branch`/`remote`/`worktree` followed
+  only by a read-only listing flag, e.g. `branch --list`) in a given `path`
+  (the sandbox root, a subdirectory, or a `review_context` `"pr"`/`"branch"`
+  checkout path) and returns its raw output, capped at ~50,000 chars. Write
+  or history-rewriting subcommands, and any `-o`/`--output`/
+  `--output-directory` flag (which writes to a file instead of returning
+  output), are refused. Complements `review_context`: use `review_context`
+  first for the common "what changed in this PR/branch/commit" case, and
+  `git_run` for anything more ad hoc it doesn't cover (diffing one file, a
+  custom `git log` format, `git blame`, etc.) — see `src/review.ts`.
 - `tool_help` – fetch the full usage guide for one other tool by name (see
   "Tool descriptions vs. `tool_help`" below). Call this before relying on a
   tricky flag (`read_file`'s `symbol`/`full`, `edit_file`'s match rules,
@@ -386,15 +397,27 @@ Recommended flow for the agent:
 
 ## Sandbox
 
-Everything is confined to a **root directory**. Paths that try to escape
-(`../../etc/passwd`, symlinks pointing outside the root, etc.) are rejected
-with an error. See `src/sandbox.ts`.
+Everything is confined to a **root directory**, plus a small set of other
+trusted **extra roots**. Paths that try to escape all of them
+(`../../etc/passwd`, symlinks pointing outside, etc.) are rejected with an
+error. See `src/sandbox.ts`.
 
-The root is determined in priority order:
+The main root is determined in priority order:
 
 1. First CLI argument: `bun run src/index.ts /path/to/project`
 2. The `MCP_SANDBOX_ROOT` env var
 3. Otherwise: the directory the server was started from (`cwd`)
+
+The only extra root configured today is `review_context`'s own
+`~/.config/c20s/reviews` (see "Tools" above) — without it, `read_file`/
+`list_dir`/`search_files`/`find_files` would have no way to actually read
+the worktree/clone path that `"pr"`/`"branch"` mode hands back, since that
+path necessarily lives outside the project being reviewed. Relative paths
+passed to any tool are still always resolved against the **main** root
+only (an extra root is only ever reachable by the absolute path
+`review_context` returned); `toRelative()` (used for display in tool output)
+picks whichever root — main or extra — actually contains a given absolute
+path, so results read naturally either way.
 
 ## Running locally
 
@@ -680,6 +703,17 @@ blocked explicitly with `--disallowedTools`.
   for robust result parsing. The path (`path` argument) is validated and
   locked to the sandbox *before* `rg` is invoked, so traversal attempts via
   that argument are stopped by our own sandbox layer, not by ripgrep.
+- `git_run` is the one tool that executes an arbitrary-ish subprocess
+  (`git`) with agent-supplied arguments, so it's deliberately the most
+  locked-down: only a fixed allow-list of read-only subcommands is
+  permitted (`diff`/`log`/`show`/`status`/`blame`/`rev-parse`, plus
+  `branch`/`remote`/`worktree` restricted to a read-only listing flag as
+  their first argument), any `-o`/`--output`/`--output-directory` flag is
+  rejected outright (it would write to an arbitrary file path instead of
+  returning output), its `path` argument goes through the same
+  `sandbox.resolve()` every other tool uses, and `Bun.spawn` is called with
+  an argv array (never a shell string), so there's no shell-interpolation
+  injection surface regardless of what the arguments contain.
 - `web_fetch`/`web_search` are **not** bound to the filesystem sandbox (there's
   no local root concept for the network), but have their own guardrails:
   GET only, no cookies/auth/redirected-state carried across requests, a

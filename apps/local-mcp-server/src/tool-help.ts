@@ -128,6 +128,24 @@ export const TOOL_GUIDE: Record<string, string> = {
   tool_help:
     "Returns this same kind of long-form guidance for any other tool by name. You're reading the output of " +
     "it right now.",
+
+  git_run:
+    "Runs one read-only git subcommand (diff, log, show, status, blame, rev-parse) in a given directory and " +
+    "returns its raw output, capped at ~50000 chars (narrow the command — add a path, '--', '-n', '--stat', " +
+    "etc. — and retry if truncated). 'branch'/'remote'/'worktree' are also allowed, but only followed by a " +
+    "read-only listing flag as their first argument (e.g. [\"branch\", \"--list\"], [\"remote\", \"-v\"], " +
+    "[\"worktree\", \"list\"]) — their write sub-actions (branch -D, remote add, worktree add/remove) are " +
+    "refused, as is any '-o'/'--output'/'--output-directory' flag on any subcommand (writes to a file " +
+    "instead of returning output, which defeats the point of a read-only tool).\n\n" +
+    "'path' must be the sandbox root, a subdirectory of it, or a path review_context's 'pr'/'branch' modes " +
+    "returned (their checkout directories are allowed extra roots) — anything else is rejected the same way " +
+    "read_file/list_dir reject an out-of-sandbox path.\n\n" +
+    "'args' is passed to 'git' as-is, e.g. {args: [\"diff\", \"main...feature/x\", \"--\", \"src/foo.ts\"]} or " +
+    "{args: [\"log\", \"--oneline\", \"-10\"]}.\n\n" +
+    "Use this for ad hoc inspection that review_context's fixed modes don't cover — e.g. diffing one file " +
+    "within a PR/branch checkout, git blame on a specific range, or a custom git log format. For the common " +
+    "case of \"what changed in this PR/branch/commit\", prefer review_context first — it already builds the " +
+    "right diff/commit list/comments in one call.",
 };
 
 export function getToolHelp(name: string): string {
